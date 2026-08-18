@@ -36,13 +36,13 @@ Depois da loja, **ninguém vê a marca LinkGym**. O ícone da loja pode dizer Li
 - A conta é o **telefone**. Qualquer aparelho. Perdeu o iPhone: mesmo número, OTP novo.
 - Primeiro acesso do aluno: convite + telefone + código de 4 dígitos. Sem senha.
 - Depois: só telefone + OTP. E-mail é opcional e não trava o v1.
-- Na prática tem um personal. A conta é da pessoa, não do estúdio.
-- Se outro personal convidar: a pessoa troca o estúdio ativo (logo, cor, layout, ficha atual). **Os dados dela permanecem** — cargas, histórico, PRs, o que o corpo já fez. Não se cria uma segunda vida no app. Não se apaga o acervo do personal anterior.
+- Na prática tem um personal. A conta é da pessoa, não do time.
+- Se outro personal convidar: a pessoa troca o time ativo (logo, cor, layout, ficha atual). **Os dados dela permanecem** — cargas, histórico, PRs, o que o corpo já fez. Não se cria uma segunda vida no app. Não se apaga o acervo do personal anterior.
 - Dois personais = um aluno, um interruptor de marca, um acervo.
 
 **Personal**
 
-- Opera o próprio estúdio. Vê a marca dele, não LinkGym.
+- Opera o próprio time. Vê a marca dele, não LinkGym.
 - Convida alunos. Publica treinos. Vê o fio (prescrito vs feito) e a atenção do dia.
 
 ## 4. Telas do v1
@@ -88,8 +88,8 @@ Termos canônicos (não misturar):
 | Termo | Significado |
 | --- | --- |
 | Pessoa | Conta humana (telefone). Pode ser personal, aluno, ou os dois. |
-| Estúdio | Marca do personal: nome, logo, cor (`--ac`). White label. |
-| Vínculo | Pessoa ↔ estúdio. Ativo = marca e ficha atuais na tela. |
+| Time | Nós em volta do personal: nome, logo, cor (`--ac`). Na tela só o nome. |
+| Vínculo | Pessoa ↔ time. Ativo = nome na tela e ficha atuais. |
 | Modelo | Estrutura do treino (exercícios, ordem, séries previstas). |
 | Prescrição | Modelo aplicado a um aluno, com **cargas e detalhes daquela pessoa**. |
 | Sessão | Execução de um dia: séries feitas, cargas, descanso, esforço. |
@@ -101,7 +101,7 @@ Termos canônicos (não misturar):
 Regras:
 
 - Sem vínculo ativo, o aluno não usa o app.
-- Trocar de personal troca o vínculo ativo e o tema. O acervo da pessoa permanece. Liga, selos de estúdio e ficha atual são do personal ativo. Cargas, PRs e histórico de sessões são da pessoa.
+- Trocar de personal troca o vínculo ativo e o tema. O acervo da pessoa permanece. Liga, selos do time e ficha atual são do personal ativo. Cargas, PRs e histórico de sessões são da pessoa.
 - Publicar em lote replica o **modelo**. Nunca replica carga. Cada prescrição nasce das informações daquele aluno (última sessão, progressão, o que ele de fato fez). O personal confirma a estrutura em segundos; o sistema preenche o individual.
 - Trocar exercício no meio da sessão (máquina ocupada) avisa o personal e não quebra a ofensiva.
 - A sessão grava no celular e sincroniza quando houver rede. Se a sessão não subir, o fio e a atenção do dia estão errados — sincronizar é tão crítico quanto publicar.
@@ -130,11 +130,11 @@ Cópia canônica: `linkgym-api/docs/superpowers/specs/2026-08-18-linkgym-v1-desi
 
 ## 8. White label
 
-Depois do login, o app busca o estúdio ativo: nome, logo (URL do storage), cor de acento.
+Depois do login, o app busca o time ativo: nome, logo (URL do storage), cor de acento.
 
 Tokens de produto (fixos): fundo, tinta, divisor, raio 0, Archivo.
 
-Token de cliente (por estúdio): `--ac`, nome, logo.
+Token de cliente (por time): `--ac`, nome, logo.
 
 Não existem paletas A/B/C da plataforma. A paleta é a do personal.
 
@@ -145,7 +145,7 @@ A API é dona da verdade. O app não inventa ofensiva, atenção do dia nem carg
 Endpoints lógicos do v1 (não REST literal — o plano de implementação detalha paths):
 
 - Auth: convite, código, sessão.
-- Estúdio ativo e troca de vínculo.
+- Time ativo e troca de vínculo.
 - Turma, atenção do dia, revisão da semana.
 - Modelo → ajustar → publicar (um ou lote).
 - Sessão: upload/sync, retorno.

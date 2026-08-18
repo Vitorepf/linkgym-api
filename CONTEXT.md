@@ -1,6 +1,6 @@
 # LinkGym
 
-Sistema operacional do personal trainer. O aluno só existe com um personal; a conta é da pessoa, a marca é do estúdio ativo.
+Sistema operacional do personal trainer. O aluno só existe com um personal; a conta é da pessoa, o nós é do time ativo.
 
 ## Language
 
@@ -8,13 +8,13 @@ Sistema operacional do personal trainer. O aluno só existe com um personal; a c
 Conta humana identificada por **telefone**. Pode ser personal, aluno, ou os dois. O acervo do corpo (cargas, PRs, sessões) pertence a ela. E-mail é opcional, não é a chave.
 _Avoid_: usuário, conta, aluno-como-identidade, client, device id
 
-**Estúdio**:
-Marca de um personal: nome, logo, cor de acento. Depois do login, é isto que aparece na tela — não LinkGym.
-_Avoid_: academia, gym, tenant, white-label, workspace
+**Time**:
+Nós em volta de um personal: nome, logo, cor de acento. Na tela só o nome (Fred, Iron Lab) — nunca a palavra Time, nunca LinkGym.
+_Avoid_: estúdio, academia, gym, tenant, white-label, workspace, assessoria, casa, equipe, marca
 
 **Vínculo**:
-Ligação Pessoa ↔ Estúdio. O vínculo ativo escolhe marca, ficha atual, liga e selos. Trocar de personal troca o vínculo ativo, não a Pessoa.
-_Avoid_: membership, matrícula, turma (turma é o conjunto de vínculos de aluno de um estúdio)
+Ligação Pessoa ↔ Time. O vínculo ativo escolhe nome na tela, ficha atual, liga e selos. Trocar de personal troca o vínculo ativo, não a Pessoa.
+_Avoid_: membership, matrícula, turma (turma é a lista de alunos daquele time, não o Time)
 
 **Convite**:
 Única porta de entrada do aluno: o personal manda, a pessoa entra com telefone e código de 4 dígitos. Sem convite não há aluno.
@@ -37,27 +37,27 @@ Série temporal prescrito vs feito, por aluno, por dia. Não é uma entidade à 
 _Avoid_: feed, timeline, dashboard
 
 **Ofensiva**:
-Sequência de cumprimentos da meta combinada com o personal ativo. Vive no Vínculo, não na Pessoa. Não é necessariamente 7 dias corridos.
-_Avoid_: streak genérico da conta, hábito, gamificação
+Sequência de cumprimentos da meta combinada com o personal ativo. Vive no Vínculo, não na Pessoa e não no Time inteiro. Não é necessariamente 7 dias corridos.
+_Avoid_: streak genérico da conta, hábito, gamificação, ofensiva do time
 
 **Protetor**:
 Primeira falha não zera a Ofensiva. Gasta sozinho.
 _Avoid_: freeze, pass, streak freeze (nome de outro produto)
 
 **Atenção do dia**:
-Fila curta de alunos daquele estúdio que precisam de um toque agora. Nunca a turma inteira. O protótipo cabe em 3.
+Fila curta de alunos daquele time que precisam de um toque agora. Nunca a turma inteira. O protótipo cabe em 3.
 _Avoid_: inbox, notificações, CRM, lista de alunos
 
 **PR**:
-Recorde de carga da Pessoa num exercício. Permanece ao trocar de estúdio.
-_Avoid_: recorde do estúdio, ranking da liga
+Recorde de carga da Pessoa num exercício. Permanece ao trocar de time.
+_Avoid_: recorde do time, ranking da liga
 
 **XP**:
-Pontos da Ofensiva no Vínculo ativo. Trocar de personal troca a liga; não leva o XP embora para o outro estúdio.
+Pontos da Ofensiva no Vínculo ativo. Trocar de personal troca a liga; não leva o XP embora para o outro time.
 _Avoid_: pontos da conta, score global
 
 **Prontidão**:
-Como a Pessoa está hoje (energia, dor, sono). É do corpo, não do estúdio.
+Como a Pessoa está hoje (energia, dor, sono). É do corpo, não do time.
 _Avoid_: Whoop, readiness score de wearable
 
 **Retomada**:

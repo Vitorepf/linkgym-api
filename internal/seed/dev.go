@@ -12,7 +12,7 @@ const (
 	PhoneHuan  = "+5511900000003"
 	PhoneJose  = "+5511900000004"
 
-	StudioName   = "Estúdio Fred"
+	StudioName   = "Fred"
 	AccentColor  = "#ec3013"
 	InviteVitor  = "FRED-VITOR"
 	InviteHuan   = "FRED-HUAN"

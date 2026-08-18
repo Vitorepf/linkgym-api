@@ -32,7 +32,7 @@ erDiagram
 | Termo | Onde |
 | --- | --- |
 | Pessoa | `people` |
-| Estúdio | `studios` |
+| Time | `studios` |
 | Vínculo | `bonds` + `people.active_bond_id` |
 | Convite + código | `invites`, `login_codes`, `auth_sessions` |
 | Modelo | `models`, `model_items` |

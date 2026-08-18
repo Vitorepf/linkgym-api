@@ -18,7 +18,7 @@ Sem senha.
 | Quem | Primeira vez | Depois |
 | --- | --- | --- |
 | Aluno | telefone + convite + OTP | telefone + OTP |
-| Personal | telefone + OTP (já é dono de estúdio) | telefone + OTP |
+| Personal | telefone + OTP (já tem time) | telefone + OTP |
 
 Sem convite válido, número novo não entra. Não existe aluno órfão.
 

@@ -48,7 +48,7 @@ Todo `make setup` deixa isto no banco (pode rodar de novo, não duplica). Só ex
 
 | Quem | Papel | Telefone |
 | --- | --- | --- |
-| Fred | Personal · Estúdio Fred | `+5511900000001` |
+| Fred | Personal · Fred | `+5511900000001` |
 | Vitor | Aluno | `+5511900000002` |
 | Huan | Aluno | `+5511900000003` |
 | Jose | Aluno | `+5511900000004` |
@@ -62,7 +62,7 @@ Migrations em `migrations/`, aplicadas por `make setup` (e de novo no boot da AP
 | Tabela | Termo |
 | --- | --- |
 | `people` | Pessoa |
-| `studios` | Estúdio |
+| `studios` | Time |
 | `bonds` | Vínculo |
 | `invites` / `login_codes` | Convite + código de 4 dígitos |
 | `models` / `model_items` | Modelo (estrutura, sem carga de aluno) |
