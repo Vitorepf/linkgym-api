@@ -72,9 +72,13 @@ set -a
 set +a
 go run ./cmd/migrate
 
+echo "seed (Fred + Vitor, Huan, Jose)..."
+go run ./cmd/seed
+
 go test ./...
 
 echo ""
 echo "Ambiente pronto. Próximo: make start"
 echo "Health: http://localhost:8080/health"
 echo "MinIO console: http://localhost:9001  (linkgym / linkgymsecret)"
+echo "Seed: Fred (personal) + alunos Vitor, Huan, Jose — telefones no README"

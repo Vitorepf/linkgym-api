@@ -17,7 +17,7 @@ make setup
 make start
 ```
 
-`make setup` confere Go e Docker, cria o `.env`, sobe Postgres + MinIO, **aplica as migrations** e roda os testes.
+`make setup` confere Go e Docker, cria o `.env`, sobe Postgres + MinIO, aplica as migrations, **semeia o Fred e os três alunos** e roda os testes.
 
 `make start` sobe a API. Pronto quando [http://localhost:8080/health](http://localhost:8080/health) responder `{"status":"ok","service":"linkgym-api"}`.
 
@@ -39,6 +39,19 @@ make test
 ```
 
 Tudo no Docker, inclusive a API: `make docker`
+
+## Dados de desenvolvimento
+
+Todo `make setup` deixa isto no banco (pode rodar de novo, não duplica). Só existe no dev — a API **não** semeia em produção.
+
+| Quem | Papel | Telefone |
+| --- | --- | --- |
+| Fred | Personal · Estúdio Fred | `+5511900000001` |
+| Vitor | Aluno | `+5511900000002` |
+| Huan | Aluno | `+5511900000003` |
+| Jose | Aluno | `+5511900000004` |
+
+Estúdio: **Estúdio Fred**, acento `#ec3013`. Convites já aceitos: `FRED-VITOR`, `FRED-HUAN`, `FRED-JOSE`.
 
 ## Banco
 
