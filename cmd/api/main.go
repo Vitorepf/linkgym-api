@@ -15,6 +15,7 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/onboard"
 	"github.com/Vitorepf/linkgym-api/internal/owner"
 	"github.com/Vitorepf/linkgym-api/internal/progress"
+	"github.com/Vitorepf/linkgym-api/internal/publish"
 	"github.com/Vitorepf/linkgym-api/internal/today"
 	"github.com/Vitorepf/linkgym-api/internal/workout"
 )
@@ -43,6 +44,7 @@ func main() {
 		today:    today.New(database, time.Now),
 		owner:    owner.New(database, time.Now),
 		progress: progress.New(database, time.Now),
+		publish:  publish.New(database, time.Now),
 		workout:  workout.New(database, time.Now),
 		onboard:  onboard.New(database, time.Now),
 	}
@@ -69,6 +71,11 @@ func main() {
 	mux.HandleFunc("POST /v1/sessions/{id}/finish", api.withPerson(api.sessionFinish))
 	mux.HandleFunc("GET /v1/progress", api.withPerson(api.progressGet))
 	mux.HandleFunc("GET /v1/records", api.withPerson(api.recordsGet))
+	mux.HandleFunc("GET /v1/models", api.withPerson(api.modelsList))
+	mux.HandleFunc("GET /v1/models/{id}", api.withPerson(api.modelGet))
+	mux.HandleFunc("POST /v1/models/{id}/draft-from-last", api.withPerson(api.draftFromLast))
+	mux.HandleFunc("PATCH /v1/prescriptions/{id}/items/{item_id}", api.withPerson(api.patchPrescriptionItem))
+	mux.HandleFunc("POST /v1/publish", api.withPerson(api.publishPost))
 	mux.HandleFunc("PUT /v1/onboarding", api.withPerson(api.onboardingPut))
 	mux.HandleFunc("PUT /v1/commitment", api.withPerson(api.commitmentPut))
 
@@ -88,6 +95,7 @@ type api struct {
 	today    *today.Service
 	owner    *owner.Service
 	progress *progress.Service
+	publish  *publish.Service
 	workout  *workout.Service
 	onboard  *onboard.Service
 }

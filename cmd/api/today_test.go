@@ -20,6 +20,7 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/onboard"
 	"github.com/Vitorepf/linkgym-api/internal/owner"
 	"github.com/Vitorepf/linkgym-api/internal/progress"
+	"github.com/Vitorepf/linkgym-api/internal/publish"
 	"github.com/Vitorepf/linkgym-api/internal/seed"
 	"github.com/Vitorepf/linkgym-api/internal/today"
 	"github.com/Vitorepf/linkgym-api/internal/workout"
@@ -70,6 +71,7 @@ func testAPI(t *testing.T) *api {
 		today:    today.New(database, time.Now),
 		owner:    owner.New(database, time.Now),
 		progress: progress.New(database, time.Now),
+		publish:  publish.New(database, time.Now),
 		workout:  workout.New(database, time.Now),
 		onboard:  onboard.New(database, time.Now),
 	}
