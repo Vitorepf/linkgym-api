@@ -47,6 +47,8 @@ type Attention struct {
 	Reason   string `json:"reason"`
 	Decision string `json:"decision"`
 	Rank     int    `json:"rank"`
+	Applied  bool   `json:"applied"`
+	Days     int    `json:"days,omitempty"`
 }
 
 func (s *Service) Home(ctx context.Context, personID string) (*Home, error) {
@@ -305,9 +307,22 @@ func (s *Service) insertTomorrowDraft(ctx context.Context, tx *sql.Tx, sessionID
 
 func (s *Service) loadAttention(ctx context.Context, studioID, day string) ([]Attention, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT a.id::text, a.person_id::text, p.name, a.reason, a.rank
+		SELECT a.id::text, a.person_id::text, p.name, a.reason, a.rank,
+		       GREATEST(1, COALESCE(
+		           $2::date - st.last_fulfilled_on,
+		           $2::date - (
+		               SELECT MAX(ws.finished_at::date)
+		               FROM workout_sessions ws
+		               WHERE ws.person_id = a.person_id
+		                 AND ws.studio_id = a.studio_id
+		                 AND ws.finished_at IS NOT NULL
+		           ),
+		           1
+		       ))
 		FROM attention_items a
 		JOIN people p ON p.id = a.person_id
+		LEFT JOIN bonds b ON b.person_id = a.person_id AND b.studio_id = a.studio_id AND b.status = 'active'
+		LEFT JOIN streaks st ON st.bond_id = b.id
 		WHERE a.studio_id = $1 AND a.for_date = $2
 		ORDER BY a.rank
 		LIMIT 3`,
@@ -321,7 +336,7 @@ func (s *Service) loadAttention(ctx context.Context, studioID, day string) ([]At
 	items := []Attention{}
 	for rows.Next() {
 		var it Attention
-		if err := rows.Scan(&it.ID, &it.PersonID, &it.Name, &it.Reason, &it.Rank); err != nil {
+		if err := rows.Scan(&it.ID, &it.PersonID, &it.Name, &it.Reason, &it.Rank, &it.Days); err != nil {
 			return nil, fmt.Errorf("owner attention scan: %w", err)
 		}
 		it.Decision = decisionFor(it.Reason)

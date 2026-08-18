@@ -128,6 +128,31 @@ func TestOwnerApplyReturnForbiddenAsStudent(t *testing.T) {
 	}
 }
 
+func TestOwnerAttentionForbiddenAsStudent(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, seed.PhoneVitor)
+	req := httptest.NewRequest(http.MethodGet, "/v1/owner/attention", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	a.withPerson(a.ownerAttention)(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOwnerApplyAttentionForbiddenAsStudent(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, seed.PhoneVitor)
+	req := httptest.NewRequest(http.MethodPost, "/v1/owner/attention/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/apply", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.SetPathValue("id", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+	rec := httptest.NewRecorder()
+	a.withPerson(a.ownerApplyAttention)(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestOwnerApplyReturnNotFound(t *testing.T) {
 	a := testAPI(t)
 	token := loginToken(t, a, seed.PhoneFred)

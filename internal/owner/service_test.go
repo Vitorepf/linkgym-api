@@ -312,3 +312,79 @@ func TestOwnerApplyBumpsExistingTomorrowDraft(t *testing.T) {
 		t.Fatalf("drafts %d want 1", n)
 	}
 }
+
+func restoreJoseAttention(t *testing.T, database *sql.DB) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = database.Exec(`
+			INSERT INTO attention_items (studio_id, person_id, for_date, reason, rank)
+			SELECT s.id, p.id, current_date, 'student_stopped', 1
+			FROM people p
+			JOIN people owner ON owner.phone = $1
+			JOIN studios s ON s.owner_person_id = owner.id
+			WHERE p.phone = $2
+			ON CONFLICT (studio_id, person_id, for_date) DO UPDATE
+			SET reason = EXCLUDED.reason, rank = EXCLUDED.rank`,
+			seed.PhoneFred, seed.PhoneJose,
+		)
+		_, _ = database.Exec(`
+			DELETE FROM comebacks
+			WHERE bond_id = (SELECT active_bond_id FROM people WHERE phone = $1)`,
+			seed.PhoneJose,
+		)
+	})
+}
+
+func TestApplyStoppedDeletesAttentionAndOpensComeback(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	restoreJoseAttention(t, database)
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	joseID := personIDByPhone(t, database, seed.PhoneJose)
+
+	home, err := svc.Home(context.Background(), fredID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(home.Attention) != 1 || home.Attention[0].Name != "Jose" {
+		t.Fatalf("seed attention %+v", home.Attention)
+	}
+	id := home.Attention[0].ID
+
+	if err := svc.Apply(context.Background(), fredID, id); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := svc.Home(context.Background(), fredID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Attention) != 0 {
+		t.Fatalf("attention still there %+v", after.Attention)
+	}
+
+	var n int
+	if err := database.QueryRow(`
+		SELECT count(*) FROM attention_items
+		WHERE person_id = $1 AND for_date = current_date`,
+		joseID,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("attention rows %d", n)
+	}
+
+	var comebacks int
+	if err := database.QueryRow(`
+		SELECT count(*) FROM comebacks
+		WHERE bond_id = (SELECT active_bond_id FROM people WHERE id = $1)
+		  AND completed_at IS NULL`,
+		joseID,
+	).Scan(&comebacks); err != nil {
+		t.Fatal(err)
+	}
+	if comebacks != 1 {
+		t.Fatalf("comebacks %d", comebacks)
+	}
+}

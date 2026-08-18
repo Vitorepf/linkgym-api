@@ -18,6 +18,20 @@ func (a *api) todayGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, got)
 }
 
+func (a *api) comebackComplete(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	err := a.today.CompleteComeback(r.Context(), sess.Person.ID, r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, today.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "erro")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 type readinessReq struct {
 	Energy   int `json:"energy"`
 	Soreness int `json:"soreness"`

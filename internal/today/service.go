@@ -92,7 +92,8 @@ type Comeback struct {
 }
 
 func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) {
-	day := s.now().Format("2006-01-02")
+	now := s.now()
+	day := now.Format("2006-01-02")
 
 	var (
 		out    Payload
@@ -101,23 +102,37 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT p.id, p.name,
 		       s.id, s.name, s.accent_color,
-		       b.id,
-		       COALESCE(st.current_count, 0),
-		       COALESCE(st.protector_available, true)
+		       b.id
 		FROM people p
 		JOIN bonds b ON b.id = p.active_bond_id
 		JOIN studios s ON s.id = b.studio_id
-		LEFT JOIN streaks st ON st.bond_id = b.id
 		WHERE p.id = $1`,
 		personID,
 	).Scan(
 		&out.Person.ID, &out.Person.Name,
 		&out.Studio.ID, &out.Studio.Name, &out.Studio.AccentColor,
 		&bondID,
-		&out.Streak.CurrentCount, &out.Streak.ProtectorAvailable,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("today person: %w", err)
+	}
+
+	if err := s.applyYesterdayMiss(ctx, personID, out.Studio.ID, bondID, now); err != nil {
+		return nil, err
+	}
+	if err := s.openD11Comeback(ctx, personID, out.Studio.ID, bondID, now); err != nil {
+		return nil, err
+	}
+
+	err = s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(st.current_count, 0), COALESCE(st.protector_available, true)
+		FROM people p
+		LEFT JOIN streaks st ON st.bond_id = p.active_bond_id
+		WHERE p.id = $1`,
+		personID,
+	).Scan(&out.Streak.CurrentCount, &out.Streak.ProtectorAvailable)
+	if err != nil {
+		return nil, fmt.Errorf("today streak: %w", err)
 	}
 
 	out.Readiness = Readiness{Score: 0, Label: "Como você está?"}
@@ -151,6 +166,11 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		return nil, fmt.Errorf("today debut: %w", err)
 	}
 	out.Debut = finished == 0
+
+	out.Comeback, err = s.loadComeback(ctx, bondID)
+	if err != nil {
+		return nil, err
+	}
 
 	var (
 		prID   string
@@ -243,7 +263,215 @@ func (s *Service) loadItems(ctx context.Context, prescriptionID string) ([]Item,
 	return items, rows.Err()
 }
 
-var ErrReadinessInvalid = errors.New("invalido")
+var (
+	ErrReadinessInvalid = errors.New("invalido")
+	ErrNotFound         = errors.New("nao_encontrado")
+)
+
+const comebackCoachLine = "Sem culpa. Nove minutos e você está de volta."
+
+func (s *Service) applyYesterdayMiss(ctx context.Context, personID, studioID, bondID string, now time.Time) error {
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var published int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT count(*) FROM prescriptions
+		WHERE person_id = $1 AND studio_id = $2 AND for_date = $3 AND status = 'published'`,
+		personID, studioID, yesterday,
+	).Scan(&published); err != nil {
+		return fmt.Errorf("today miss published: %w", err)
+	}
+	if published == 0 {
+		return nil
+	}
+
+	var finished int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT count(*) FROM workout_sessions ws
+		JOIN prescriptions pr ON pr.id = ws.prescription_id
+		WHERE pr.person_id = $1 AND pr.studio_id = $2 AND pr.for_date = $3
+		  AND pr.status = 'published' AND ws.finished_at IS NOT NULL`,
+		personID, studioID, yesterday,
+	).Scan(&finished); err != nil {
+		return fmt.Errorf("today miss session: %w", err)
+	}
+	if finished > 0 {
+		return nil
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO streaks (bond_id, current_count, protector_available)
+		VALUES ($1, 0, true)
+		ON CONFLICT (bond_id) DO NOTHING`,
+		bondID,
+	); err != nil {
+		return fmt.Errorf("today miss streak insert: %w", err)
+	}
+
+	var (
+		count        int
+		protector    bool
+		spentToday   bool
+		updatedToday bool
+	)
+	if err := tx.QueryRowContext(ctx, `
+		SELECT current_count, protector_available,
+		       COALESCE(protector_spent_at::date = $2::date, false),
+		       updated_at::date = $2::date
+		FROM streaks WHERE bond_id = $1
+		FOR UPDATE`,
+		bondID, today,
+	).Scan(&count, &protector, &spentToday, &updatedToday); err != nil {
+		return fmt.Errorf("today miss streak: %w", err)
+	}
+	if spentToday || (count == 0 && !protector && updatedToday) {
+		return nil
+	}
+
+	if protector {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE streaks
+			SET protector_available = false, protector_spent_at = $2, updated_at = $2
+			WHERE bond_id = $1`,
+			bondID, now,
+		); err != nil {
+			return fmt.Errorf("today miss spend: %w", err)
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE streaks
+			SET current_count = 0, updated_at = $2
+			WHERE bond_id = $1`,
+			bondID, now,
+		); err != nil {
+			return fmt.Errorf("today miss zero: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Service) openD11Comeback(ctx context.Context, personID, studioID, bondID string, now time.Time) error {
+	var lastFulfilled sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+		SELECT last_fulfilled_on FROM streaks WHERE bond_id = $1`,
+		bondID,
+	).Scan(&lastFulfilled)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("today d11 streak: %w", err)
+	}
+
+	anchor := lastFulfilled
+	if !anchor.Valid {
+		err = s.db.QueryRowContext(ctx, `
+			SELECT MAX(finished_at) FROM workout_sessions
+			WHERE person_id = $1 AND studio_id = $2 AND finished_at IS NOT NULL`,
+			personID, studioID,
+		).Scan(&anchor)
+		if err != nil {
+			return fmt.Errorf("today d11 finished: %w", err)
+		}
+	}
+	if !anchor.Valid {
+		return nil
+	}
+
+	if calendarDays(anchor.Time, now) < 11 {
+		return nil
+	}
+
+	return upsertOpenComeback(ctx, s.db, bondID, now.Format("2006-01-02"))
+}
+
+func calendarDays(from, to time.Time) int {
+	a := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
+	b := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
+	return int(b.Sub(a).Hours() / 24)
+}
+
+func upsertOpenComeback(ctx context.Context, db execQuerier, bondID, missedOn string) error {
+	var openID sql.NullString
+	err := db.QueryRowContext(ctx, `
+		SELECT id::text FROM comebacks
+		WHERE bond_id = $1 AND completed_at IS NULL
+		LIMIT 1`,
+		bondID,
+	).Scan(&openID)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("today comeback open: %w", err)
+	}
+	if openID.Valid {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO comebacks (bond_id, missed_on)
+		VALUES ($1, $2::date)
+		ON CONFLICT (bond_id, missed_on) DO NOTHING`,
+		bondID, missedOn,
+	); err != nil {
+		return fmt.Errorf("today comeback insert: %w", err)
+	}
+	return nil
+}
+
+type execQuerier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (s *Service) loadComeback(ctx context.Context, bondID string) (*Comeback, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id::text FROM comebacks
+		WHERE bond_id = $1 AND completed_at IS NULL
+		ORDER BY missed_on DESC
+		LIMIT 1`,
+		bondID,
+	).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("today comeback: %w", err)
+	}
+	return &Comeback{
+		ID:        id,
+		Minutes:   9,
+		CoachLine: comebackCoachLine,
+	}, nil
+}
+
+func (s *Service) CompleteComeback(ctx context.Context, personID, comebackID string) error {
+	if comebackID == "" {
+		return ErrNotFound
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE comebacks c
+		SET completed_at = $3
+		FROM people p
+		WHERE c.id = $1 AND p.id = $2
+		  AND c.bond_id = p.active_bond_id
+		  AND c.completed_at IS NULL`,
+		comebackID, personID, s.now(),
+	)
+	if err != nil {
+		return fmt.Errorf("today comeback complete: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
 func (s *Service) PutReadiness(ctx context.Context, personID string, energy, soreness, sleep int) (Readiness, error) {
 	if !inScale(energy) || !inScale(soreness) || !inScale(sleep) {
