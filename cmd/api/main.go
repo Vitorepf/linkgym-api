@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Vitorepf/linkgym-api/internal/auth"
 	"github.com/Vitorepf/linkgym-api/internal/config"
 	"github.com/Vitorepf/linkgym-api/internal/db"
 	"github.com/Vitorepf/linkgym-api/internal/migrate"
@@ -30,9 +31,17 @@ func main() {
 	}
 
 	addr := ":" + config.Getenv("PORT", "8080")
-	api := &api{db: database}
+	dev := config.Getenv("ENV", "development") == "development"
+	api := &api{
+		db:   database,
+		auth: auth.New(database, config.Getenv("AUTH_PEPPER", ""), dev),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", api.health)
+	mux.HandleFunc("POST /v1/auth/code", api.requestCode)
+	mux.HandleFunc("POST /v1/auth/verify", api.verify)
+	mux.HandleFunc("GET /v1/me", api.me)
+	mux.HandleFunc("POST /v1/auth/logout", api.logout)
 
 	server := &http.Server{
 		Addr:              addr,
@@ -45,7 +54,8 @@ func main() {
 }
 
 type api struct {
-	db *sql.DB
+	db   *sql.DB
+	auth *auth.Service
 }
 
 func (a *api) health(w http.ResponseWriter, _ *http.Request) {

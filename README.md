@@ -53,7 +53,7 @@ Todo `make setup` deixa isto no banco (pode rodar de novo, não duplica). Só ex
 | Huan | Aluno | `+5511900000003` |
 | Jose | Aluno | `+5511900000004` |
 
-Estúdio: **Estúdio Fred**, acento `#ec3013`. Convites já aceitos: `FRED-VITOR`, `FRED-HUAN`, `FRED-JOSE`.
+No app, atalho de dev: Fred / Vitor / Huan / Jose. OTP local: `0000`.
 
 ## Banco
 

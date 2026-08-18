@@ -5,8 +5,8 @@ Sistema operacional do personal trainer. O aluno só existe com um personal; a c
 ## Language
 
 **Pessoa**:
-Conta humana identificada por telefone. Pode ser personal, aluno, ou os dois. O acervo do corpo (cargas, PRs, sessões) pertence a ela.
-_Avoid_: usuário, conta, aluno-como-identidade, client
+Conta humana identificada por **telefone**. Pode ser personal, aluno, ou os dois. O acervo do corpo (cargas, PRs, sessões) pertence a ela. E-mail é opcional, não é a chave.
+_Avoid_: usuário, conta, aluno-como-identidade, client, device id
 
 **Estúdio**:
 Marca de um personal: nome, logo, cor de acento. Depois do login, é isto que aparece na tela — não LinkGym.

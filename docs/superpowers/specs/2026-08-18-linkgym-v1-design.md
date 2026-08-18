@@ -33,7 +33,9 @@ Depois da loja, **ninguém vê a marca LinkGym**. O ícone da loja pode dizer Li
 **Aluno**
 
 - Não existe “entrar sem personal”.
-- Primeiro acesso: convite + telefone + código de 4 dígitos. Sem senha.
+- A conta é o **telefone**. Qualquer aparelho. Perdeu o iPhone: mesmo número, OTP novo.
+- Primeiro acesso do aluno: convite + telefone + código de 4 dígitos. Sem senha.
+- Depois: só telefone + OTP. E-mail é opcional e não trava o v1.
 - Na prática tem um personal. A conta é da pessoa, não do estúdio.
 - Se outro personal convidar: a pessoa troca o estúdio ativo (logo, cor, layout, ficha atual). **Os dados dela permanecem** — cargas, histórico, PRs, o que o corpo já fez. Não se cria uma segunda vida no app. Não se apaga o acervo do personal anterior.
 - Dois personais = um aluno, um interruptor de marca, um acervo.
