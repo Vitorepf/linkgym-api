@@ -144,6 +144,29 @@ func TestStreakLivesOnTheBond(t *testing.T) {
 	}
 }
 
+func TestV1TablesExist(t *testing.T) {
+	database := openTestDB(t)
+	need := []string{
+		"people", "studios", "bonds", "invites", "login_codes", "auth_sessions",
+		"media_objects", "exercises", "models", "model_items",
+		"prescriptions", "prescription_items", "workout_sessions", "workout_sets",
+		"personal_records", "streaks", "badges", "attention_items",
+		"xp_ledger", "readiness_logs", "push_devices", "jobs",
+		"progress_photos", "session_alerts", "comebacks",
+	}
+	for _, name := range need {
+		var found string
+		err := database.QueryRow(`SELECT to_regclass('public.' || $1)`, name).Scan(&found)
+		if err != nil || found == "" {
+			t.Errorf("faltou tabela %s: %v", name, err)
+		}
+	}
+	var view string
+	if err := database.QueryRow(`SELECT to_regclass('public.fio_days')`).Scan(&view); err != nil || view == "" {
+		t.Fatalf("faltou view fio_days: %v", err)
+	}
+}
+
 func mustExec(t *testing.T, tx *sql.Tx, query string, dest *string, args ...any) {
 	t.Helper()
 	if dest != nil {

@@ -55,7 +55,7 @@ Estúdio: **Estúdio Fred**, acento `#ec3013`. Convites já aceitos: `FRED-VITOR
 
 ## Banco
 
-Migrations em `migrations/`, aplicadas por `make setup` (e de novo no boot da API). Linguagem do domínio: [`CONTEXT.md`](CONTEXT.md).
+Migrations em `migrations/`, aplicadas por `make setup` (e de novo no boot da API). Mapa: [`docs/schema.md`](docs/schema.md). Linguagem: [`CONTEXT.md`](CONTEXT.md).
 
 | Tabela | Termo |
 | --- | --- |
@@ -67,8 +67,12 @@ Migrations em `migrations/`, aplicadas por `make setup` (e de novo no boot da AP
 | `prescriptions` / `prescription_items` | Prescrição (carga daquela pessoa) |
 | `workout_sessions` / `workout_sets` | Sessão |
 | `personal_records` | PR da Pessoa |
-| `streaks` | Ofensiva + protetor do Vínculo |
+| `streaks` / `xp_ledger` | Ofensiva, protetor, XP do Vínculo |
 | `attention_items` | Atenção do dia |
+| `readiness_logs` | Prontidão |
+| `comebacks` | Retomada |
+| `fio_days` | Fio (view) |
+| `jobs` | Fila (vazia) |
 
 ## Travas (não mexer)
 

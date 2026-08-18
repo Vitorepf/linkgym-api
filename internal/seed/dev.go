@@ -133,5 +133,120 @@ func Dev(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("active bond: %w", err)
 	}
 
+	if err := seedWorkout(ctx, db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func seedWorkout(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO exercises (studio_id, name)
+		SELECT s.id, e.name
+		FROM studios s
+		JOIN people owner ON owner.id = s.owner_person_id
+		CROSS JOIN (VALUES ('Supino'), ('Remada'), ('Agachamento')) AS e(name)
+		WHERE owner.phone = $1
+		ON CONFLICT (studio_id, name) DO NOTHING`,
+		PhoneFred,
+	); err != nil {
+		return fmt.Errorf("exercises: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO models (studio_id, name, created_by_person_id)
+		SELECT s.id, 'Treino A', owner.id
+		FROM studios s
+		JOIN people owner ON owner.id = s.owner_person_id
+		WHERE owner.phone = $1
+		ON CONFLICT (studio_id, name) DO NOTHING`,
+		PhoneFred,
+	); err != nil {
+		return fmt.Errorf("model: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO model_items (model_id, exercise_id, position, planned_sets, planned_reps, starter_load_kg)
+		SELECT m.id, ex.id, x.position, 3, '8-12', x.starter
+		FROM models m
+		JOIN studios s ON s.id = m.studio_id
+		JOIN people owner ON owner.id = s.owner_person_id
+		CROSS JOIN (VALUES
+			(1, 'Supino', 20::numeric),
+			(2, 'Remada', 18::numeric),
+			(3, 'Agachamento', 40::numeric)
+		) AS x(position, name, starter)
+		JOIN exercises ex ON ex.studio_id = s.id AND ex.name = x.name
+		WHERE owner.phone = $1 AND m.name = 'Treino A'
+		ON CONFLICT (model_id, position) DO UPDATE
+		SET exercise_id = EXCLUDED.exercise_id,
+		    starter_load_kg = EXCLUDED.starter_load_kg`,
+		PhoneFred,
+	); err != nil {
+		return fmt.Errorf("model items: %w", err)
+	}
+
+	loads := []struct {
+		phone  string
+		load   float64
+		source string
+	}{
+		{PhoneVitor, 40, "history"},
+		{PhoneHuan, 22.5, "history"},
+		{PhoneJose, 20, "starter"},
+	}
+
+	for _, row := range loads {
+		var prescriptionID string
+		err := db.QueryRowContext(ctx, `
+			INSERT INTO prescriptions (studio_id, person_id, model_id, for_date, status, published_at)
+			SELECT s.id, p.id, m.id, current_date, 'published', now()
+			FROM people p
+			JOIN people owner ON owner.phone = $1
+			JOIN studios s ON s.owner_person_id = owner.id
+			JOIN models m ON m.studio_id = s.id AND m.name = 'Treino A'
+			WHERE p.phone = $2
+			ON CONFLICT (person_id, studio_id, for_date) WHERE status = 'published'
+			DO UPDATE SET updated_at = now()
+			RETURNING id`,
+			PhoneFred, row.phone,
+		).Scan(&prescriptionID)
+		if err != nil {
+			return fmt.Errorf("prescription %s: %w", row.phone, err)
+		}
+
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO prescription_items (
+				prescription_id, exercise_id, position, planned_sets, planned_reps, load_kg, load_source
+			)
+			SELECT $1, mi.exercise_id, mi.position, mi.planned_sets, mi.planned_reps,
+			       CASE WHEN mi.position = 1 THEN $2 ELSE mi.starter_load_kg END,
+			       $3
+			FROM model_items mi
+			JOIN models m ON m.id = mi.model_id
+			WHERE m.id = (SELECT model_id FROM prescriptions WHERE id = $1)
+			ON CONFLICT (prescription_id, position) DO UPDATE
+			SET load_kg = EXCLUDED.load_kg, load_source = EXCLUDED.load_source`,
+			prescriptionID, row.load, row.source,
+		); err != nil {
+			return fmt.Errorf("prescription items %s: %w", row.phone, err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO attention_items (studio_id, person_id, for_date, reason, rank)
+		SELECT s.id, p.id, current_date, 'student_stopped', 1
+		FROM people p
+		JOIN people owner ON owner.phone = $1
+		JOIN studios s ON s.owner_person_id = owner.id
+		WHERE p.phone = $2
+		ON CONFLICT (studio_id, person_id, for_date) DO UPDATE
+		SET reason = EXCLUDED.reason, rank = EXCLUDED.rank`,
+		PhoneFred, PhoneJose,
+	); err != nil {
+		return fmt.Errorf("attention: %w", err)
+	}
+
 	return nil
 }

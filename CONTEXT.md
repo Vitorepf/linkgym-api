@@ -51,3 +51,15 @@ _Avoid_: inbox, notificações, CRM, lista de alunos
 **PR**:
 Recorde de carga da Pessoa num exercício. Permanece ao trocar de estúdio.
 _Avoid_: recorde do estúdio, ranking da liga
+
+**XP**:
+Pontos da Ofensiva no Vínculo ativo. Trocar de personal troca a liga; não leva o XP embora para o outro estúdio.
+_Avoid_: pontos da conta, score global
+
+**Prontidão**:
+Como a Pessoa está hoje (energia, dor, sono). É do corpo, não do estúdio.
+_Avoid_: Whoop, readiness score de wearable
+
+**Retomada**:
+Cartão curto quando o aluno some. Vive no Vínculo. Não apaga PR, carga nem histórico.
+_Avoid_: win-back, reativação de CRM, reset de conta

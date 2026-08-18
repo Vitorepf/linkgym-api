@@ -87,4 +87,19 @@ func TestDevSeedIsIdempotent(t *testing.T) {
 	if studio != StudioName || owner != "Fred" {
 		t.Fatalf("studio=%s owner=%s", studio, owner)
 	}
+
+	var loads int
+	if err := database.QueryRow(`
+		SELECT count(DISTINCT pi.load_kg)
+		FROM prescription_items pi
+		JOIN prescriptions pr ON pr.id = pi.prescription_id
+		JOIN people p ON p.id = pr.person_id
+		WHERE p.phone IN ($1, $2, $3) AND pi.position = 1`,
+		PhoneVitor, PhoneHuan, PhoneJose,
+	).Scan(&loads); err != nil {
+		t.Fatal(err)
+	}
+	if loads != 3 {
+		t.Fatalf("lote tinha %d cargas distintas no supino, want 3", loads)
+	}
 }
