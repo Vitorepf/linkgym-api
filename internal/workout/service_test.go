@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -406,6 +407,77 @@ func TestFinishWithNoSetsRejected(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("xp rows %d", n)
 	}
+}
+
+func TestSwapWritesAlertAndKeepsStreak(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	lift := vitorSupinoToday(t, database)
+	remadaID := exerciseIDByName(t, database, "Remada")
+	ctx := context.Background()
+
+	if _, err := database.Exec(`
+		UPDATE streaks SET current_count = 7
+		WHERE bond_id = (SELECT active_bond_id FROM people WHERE id = $1)`,
+		lift.personID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	started, err := svc.Start(ctx, lift.personID, newUUID(), lift.prescriptionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Swap(ctx, lift.personID, started.ID, lift.exerciseID, remadaID); err != nil {
+		t.Fatal(err)
+	}
+
+	var kind string
+	var payload []byte
+	if err := database.QueryRow(`
+		SELECT kind, payload FROM session_alerts
+		WHERE session_id = $1 AND kind = 'exercise_swap'`,
+		started.ID,
+	).Scan(&kind, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "exercise_swap" {
+		t.Fatalf("kind %s", kind)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["from"] != lift.exerciseID || got["to"] != remadaID || got["person"] != lift.personID {
+		t.Fatalf("payload %s", payload)
+	}
+
+	var streak int
+	if err := database.QueryRow(`
+		SELECT current_count FROM streaks
+		WHERE bond_id = (SELECT active_bond_id FROM people WHERE id = $1)`,
+		lift.personID,
+	).Scan(&streak); err != nil {
+		t.Fatal(err)
+	}
+	if streak != 7 {
+		t.Fatalf("streak %d want 7", streak)
+	}
+}
+
+func exerciseIDByName(t *testing.T, database *sql.DB, name string) string {
+	t.Helper()
+	var id string
+	if err := database.QueryRow(`
+		SELECT e.id::text FROM exercises e
+		JOIN studios s ON s.id = e.studio_id
+		JOIN people o ON o.id = s.owner_person_id
+		WHERE o.phone = $1 AND e.name = $2`,
+		seed.PhoneFred, name,
+	).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func TestFinishForbiddenForOtherPerson(t *testing.T) {

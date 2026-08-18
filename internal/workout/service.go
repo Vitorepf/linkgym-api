@@ -169,6 +169,52 @@ func (s *Service) AddSet(ctx context.Context, personID, sessionID string, in Set
 	return got, nil
 }
 
+func (s *Service) Swap(ctx context.Context, personID, sessionID, fromID, toID string) error {
+	if fromID == "" || toID == "" || fromID == toID {
+		return ErrInvalid
+	}
+
+	var (
+		ownerID, studioID string
+		finishedAt        sql.NullTime
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT person_id::text, studio_id::text, finished_at
+		FROM workout_sessions
+		WHERE id = $1`,
+		sessionID,
+	).Scan(&ownerID, &studioID, &finishedAt)
+	if err == sql.ErrNoRows {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("swap session: %w", err)
+	}
+	if ownerID != personID {
+		return ErrForbidden
+	}
+	if finishedAt.Valid {
+		return ErrInvalid
+	}
+
+	payload, err := json.Marshal(map[string]string{
+		"from":   fromID,
+		"to":     toID,
+		"person": personID,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO session_alerts (studio_id, person_id, session_id, kind, payload)
+		VALUES ($1, $2, $3, 'exercise_swap', $4)`,
+		studioID, personID, sessionID, payload,
+	); err != nil {
+		return fmt.Errorf("swap alert: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort int) (*FinishResult, error) {
 	if effort < 1 || effort > 3 {
 		return nil, ErrInvalid

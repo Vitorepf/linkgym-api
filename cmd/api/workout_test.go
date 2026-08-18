@@ -67,3 +67,13 @@ func TestSessionForbiddenForOtherPerson(t *testing.T) {
 		t.Fatalf("status %d body %s", finishRec.Code, finishRec.Body.String())
 	}
 }
+
+func TestSwapUnauthorizedWithoutToken(t *testing.T) {
+	a := testAPI(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/sessions/x/swap", bytes.NewBufferString(`{}`))
+	rec := httptest.NewRecorder()
+	a.withPerson(a.sessionSwap)(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}

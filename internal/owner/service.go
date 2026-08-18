@@ -3,6 +3,7 @@ package owner
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -88,7 +89,218 @@ func (s *Service) Home(ctx context.Context, personID string) (*Home, error) {
 		return nil, err
 	}
 	out.Fio = fio
+
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT count(*) FROM session_alerts
+		WHERE studio_id = $1 AND kind = 'session_synced' AND read_at IS NULL`,
+		studioID,
+	).Scan(&out.UnreadReturns); err != nil {
+		return nil, fmt.Errorf("owner home returns: %w", err)
+	}
 	return &out, nil
+}
+
+type Record struct {
+	ExerciseName string  `json:"exercise_name"`
+	LoadKg       float64 `json:"load_kg"`
+	PreviousKg   float64 `json:"previous_kg"`
+}
+
+type ReturnItem struct {
+	AlertID   string    `json:"alert_id"`
+	PersonID  string    `json:"person_id"`
+	Name      string    `json:"name"`
+	Effort    int       `json:"effort"`
+	Records   []Record  `json:"records"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *Service) ownerStudio(ctx context.Context, personID string) (string, error) {
+	var role, studioID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT b.role, b.studio_id::text
+		FROM people p
+		JOIN bonds b ON b.id = p.active_bond_id
+		WHERE p.id = $1`,
+		personID,
+	).Scan(&role, &studioID)
+	if err == sql.ErrNoRows {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if role != "owner" {
+		return "", ErrForbidden
+	}
+	return studioID, nil
+}
+
+func (s *Service) Returns(ctx context.Context, ownerID string) ([]ReturnItem, error) {
+	studioID, err := s.ownerStudio(ctx, ownerID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT a.id::text, a.person_id::text, p.name, COALESCE(ws.effort, 0), a.payload, a.created_at
+		FROM session_alerts a
+		JOIN people p ON p.id = a.person_id
+		LEFT JOIN workout_sessions ws ON ws.id = a.session_id
+		WHERE a.studio_id = $1 AND a.kind = 'session_synced' AND a.read_at IS NULL
+		ORDER BY a.created_at DESC`,
+		studioID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("owner returns: %w", err)
+	}
+	defer rows.Close()
+
+	items := []ReturnItem{}
+	for rows.Next() {
+		var (
+			it     ReturnItem
+			effort float64
+			raw    []byte
+		)
+		if err := rows.Scan(&it.AlertID, &it.PersonID, &it.Name, &effort, &raw, &it.CreatedAt); err != nil {
+			return nil, fmt.Errorf("owner returns scan: %w", err)
+		}
+		it.Effort = int(effort)
+		it.Records = []Record{}
+		var payload struct {
+			Records []Record `json:"records"`
+		}
+		if len(raw) > 0 && json.Unmarshal(raw, &payload) == nil && payload.Records != nil {
+			it.Records = payload.Records
+		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+func allowedBump(v float64) bool {
+	return v == 2.5 || v == 0 || v == -2.5
+}
+
+func (s *Service) ApplyReturn(ctx context.Context, ownerID, alertID string, bump float64) error {
+	if alertID == "" || !allowedBump(bump) {
+		return ErrInvalid
+	}
+	studioID, err := s.ownerStudio(ctx, ownerID)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var (
+		personID, sessionID sql.NullString
+		kind                string
+		readAt              sql.NullTime
+	)
+	err = tx.QueryRowContext(ctx, `
+		SELECT person_id::text, session_id::text, kind, read_at
+		FROM session_alerts
+		WHERE id = $1 AND studio_id = $2
+		FOR UPDATE`,
+		alertID, studioID,
+	).Scan(&personID, &sessionID, &kind, &readAt)
+	if err == sql.ErrNoRows {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("owner apply alert: %w", err)
+	}
+	if kind != "session_synced" || readAt.Valid || !personID.Valid {
+		return ErrNotFound
+	}
+
+	now := s.now()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE session_alerts SET read_at = $2 WHERE id = $1`,
+		alertID, now,
+	); err != nil {
+		return fmt.Errorf("owner apply read: %w", err)
+	}
+
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+	var draftID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT id::text FROM prescriptions
+		WHERE person_id = $1 AND studio_id = $2 AND for_date = $3 AND status = 'draft'
+		ORDER BY created_at DESC
+		LIMIT 1
+		FOR UPDATE`,
+		personID.String, studioID, tomorrow,
+	).Scan(&draftID)
+	if err == sql.ErrNoRows {
+		if err := s.insertTomorrowDraft(ctx, tx, sessionID, tomorrow, bump, &draftID); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return fmt.Errorf("owner apply draft: %w", err)
+	} else if _, err := tx.ExecContext(ctx, `
+		UPDATE prescription_items
+		SET load_kg = GREATEST(0, COALESCE(load_kg, 0) + $2), load_source = 'manual'
+		WHERE prescription_id = $1
+		  AND position = (SELECT MIN(position) FROM prescription_items WHERE prescription_id = $1)`,
+		draftID, bump,
+	); err != nil {
+		return fmt.Errorf("owner apply bump: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) insertTomorrowDraft(ctx context.Context, tx *sql.Tx, sessionID sql.NullString, tomorrow string, bump float64, draftID *string) error {
+	if !sessionID.Valid {
+		return ErrInvalid
+	}
+	var sourceID sql.NullString
+	err := tx.QueryRowContext(ctx, `
+		SELECT prescription_id::text FROM workout_sessions WHERE id = $1`,
+		sessionID.String,
+	).Scan(&sourceID)
+	if err == sql.ErrNoRows || !sourceID.Valid {
+		return ErrInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("owner apply session: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, `
+		INSERT INTO prescriptions (studio_id, person_id, model_id, for_date, status)
+		SELECT studio_id, person_id, model_id, $2::date, 'draft'
+		FROM prescriptions WHERE id = $1
+		RETURNING id::text`,
+		sourceID.String, tomorrow,
+	).Scan(draftID); err != nil {
+		return fmt.Errorf("owner apply insert: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO prescription_items (
+			prescription_id, exercise_id, position, planned_sets, planned_reps,
+			load_kg, rest_seconds, notes, load_source
+		)
+		SELECT $1, exercise_id, position, planned_sets, planned_reps,
+			GREATEST(0, COALESCE(load_kg, 0) + CASE WHEN position = (
+				SELECT MIN(position) FROM prescription_items WHERE prescription_id = $2
+			) THEN $3::numeric ELSE 0 END),
+			rest_seconds, notes, 'manual'
+		FROM prescription_items
+		WHERE prescription_id = $2`,
+		*draftID, sourceID.String, bump,
+	); err != nil {
+		return fmt.Errorf("owner apply items: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) loadAttention(ctx context.Context, studioID, day string) ([]Attention, error) {

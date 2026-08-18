@@ -51,8 +51,11 @@ func main() {
 	mux.HandleFunc("GET /v1/today", api.withPerson(api.todayGet))
 	mux.HandleFunc("PUT /v1/today/readiness", api.withPerson(api.todayReadinessPut))
 	mux.HandleFunc("GET /v1/owner/home", api.withPerson(api.ownerHome))
+	mux.HandleFunc("GET /v1/owner/returns", api.withPerson(api.ownerReturns))
+	mux.HandleFunc("POST /v1/owner/returns/{alert_id}/apply", api.withPerson(api.ownerApplyReturn))
 	mux.HandleFunc("POST /v1/sessions", api.withPerson(api.sessionStart))
 	mux.HandleFunc("POST /v1/sessions/{id}/sets", api.withPerson(api.sessionAddSet))
+	mux.HandleFunc("POST /v1/sessions/{id}/swap", api.withPerson(api.sessionSwap))
 	mux.HandleFunc("POST /v1/sessions/{id}/finish", api.withPerson(api.sessionFinish))
 
 	server := &http.Server{

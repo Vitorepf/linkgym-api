@@ -81,6 +81,26 @@ func (a *api) sessionAddSet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, got)
 }
 
+type swapReq struct {
+	FromExerciseID string `json:"from_exercise_id"`
+	ToExerciseID   string `json:"to_exercise_id"`
+}
+
+func (a *api) sessionSwap(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	var req swapReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	err := a.workout.Swap(r.Context(), sess.Person.ID, r.PathValue("id"), req.FromExerciseID, req.ToExerciseID)
+	if err != nil {
+		writeWorkoutError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (a *api) sessionFinish(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	var req finishReq
