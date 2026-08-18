@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/Vitorepf/linkgym-api/internal/auth"
 )
@@ -73,11 +72,6 @@ func (a *api) logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func bearer(r *http.Request) string {
-	h := r.Header.Get("Authorization")
-	return strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
-}
-
 func writeAuthError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, auth.ErrUnauthorized):
@@ -90,14 +84,4 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, "erro")
 	}
-}
-
-func writeError(w http.ResponseWriter, status int, code string) {
-	writeJSON(w, status, map[string]string{"error": code})
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
