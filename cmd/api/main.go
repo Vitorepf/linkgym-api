@@ -12,6 +12,8 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/config"
 	"github.com/Vitorepf/linkgym-api/internal/db"
 	"github.com/Vitorepf/linkgym-api/internal/migrate"
+	"github.com/Vitorepf/linkgym-api/internal/owner"
+	"github.com/Vitorepf/linkgym-api/internal/today"
 )
 
 func main() {
@@ -33,8 +35,10 @@ func main() {
 	addr := ":" + config.Getenv("PORT", "8080")
 	dev := config.Getenv("ENV", "development") == "development"
 	api := &api{
-		db:   database,
-		auth: auth.New(database, config.Getenv("AUTH_PEPPER", ""), dev),
+		db:    database,
+		auth:  auth.New(database, config.Getenv("AUTH_PEPPER", ""), dev),
+		today: today.New(database, time.Now),
+		owner: owner.New(database, time.Now),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", api.health)
@@ -42,6 +46,8 @@ func main() {
 	mux.HandleFunc("POST /v1/auth/verify", api.verify)
 	mux.HandleFunc("GET /v1/me", api.me)
 	mux.HandleFunc("POST /v1/auth/logout", api.logout)
+	mux.HandleFunc("GET /v1/today", api.withPerson(api.todayGet))
+	mux.HandleFunc("GET /v1/owner/home", api.withPerson(api.ownerHome))
 
 	server := &http.Server{
 		Addr:              addr,
@@ -54,8 +60,10 @@ func main() {
 }
 
 type api struct {
-	db   *sql.DB
-	auth *auth.Service
+	db    *sql.DB
+	auth  *auth.Service
+	today *today.Service
+	owner *owner.Service
 }
 
 func (a *api) health(w http.ResponseWriter, _ *http.Request) {
