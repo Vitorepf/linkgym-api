@@ -106,7 +106,9 @@ Regras:
 
 ## 6. Stack
 
-- **App:** Expo (TypeScript), um binário, duas contas. Swift só depois, e só onde o Expo não chega (HealthKit, Watch, widget nativo). Não há reescrita total em Swift no horizonte do v1.
+- **App:** Expo **TypeScript** (não JavaScript). Um binário, duas contas.
+- **UI:** `StyleSheet` + tokens em `src/theme.ts`. Motion com Reanimated 4 + Gesture Handler. Sem Tamagui, sem NativeWind, sem styled-components — eles brigam com o Modernist (raio 0, um acento, Archivo) e a IA alucina API.
+- **Swift:** só depois, e só onde o Expo não chega (HealthKit, Watch, widget nativo). Não há reescrita total em Swift no horizonte do v1.
 - **API:** Go.
 - **Banco:** Postgres (fonte da verdade, inclusive fila de jobs — River ou equivalente).
 - **Arquivos:** object storage (R2 ou S3). Logo, vídeo de exercício, foto de evolução. Postgres guarda o caminho.
