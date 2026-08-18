@@ -17,7 +17,7 @@ make setup
 make start
 ```
 
-`make setup` confere Go e Docker, cria o `.env`, sobe Postgres + MinIO e roda os testes.
+`make setup` confere Go e Docker, cria o `.env`, sobe Postgres + MinIO, **aplica as migrations** e roda os testes.
 
 `make start` sobe a API. Pronto quando [http://localhost:8080/health](http://localhost:8080/health) responder `{"status":"ok","service":"linkgym-api"}`.
 
@@ -39,6 +39,23 @@ make test
 ```
 
 Tudo no Docker, inclusive a API: `make docker`
+
+## Banco
+
+Migrations em `migrations/`, aplicadas por `make setup` (e de novo no boot da API). Linguagem do domínio: [`CONTEXT.md`](CONTEXT.md).
+
+| Tabela | Termo |
+| --- | --- |
+| `people` | Pessoa |
+| `studios` | Estúdio |
+| `bonds` | Vínculo |
+| `invites` / `login_codes` | Convite + código de 4 dígitos |
+| `models` / `model_items` | Modelo (estrutura, sem carga de aluno) |
+| `prescriptions` / `prescription_items` | Prescrição (carga daquela pessoa) |
+| `workout_sessions` / `workout_sets` | Sessão |
+| `personal_records` | PR da Pessoa |
+| `streaks` | Ofensiva + protetor do Vínculo |
+| `attention_items` | Atenção do dia |
 
 ## Travas (não mexer)
 

@@ -1,19 +1,19 @@
-package main
+package config
 
 import (
 	"os"
 	"strings"
 )
 
-func loadDotEnv(path string) {
+func LoadDotEnv(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
-	applyDotEnv(string(data))
+	ApplyDotEnv(string(data))
 }
 
-func applyDotEnv(contents string) {
+func ApplyDotEnv(contents string) {
 	for _, line := range strings.Split(contents, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -32,4 +32,11 @@ func applyDotEnv(contents string) {
 			_ = os.Setenv(key, val)
 		}
 	}
+}
+
+func Getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

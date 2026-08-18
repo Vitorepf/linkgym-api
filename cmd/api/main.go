@@ -1,18 +1,38 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/Vitorepf/linkgym-api/internal/config"
+	"github.com/Vitorepf/linkgym-api/internal/db"
+	"github.com/Vitorepf/linkgym-api/internal/migrate"
 )
 
 func main() {
-	loadDotEnv(".env")
-	addr := ":" + getenv("PORT", "8080")
+	config.LoadDotEnv(".env")
+
+	url := os.Getenv("DATABASE_URL")
+	if url == "" {
+		log.Fatal("DATABASE_URL is required")
+	}
+	database, err := db.Open(url)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer database.Close()
+	if err := migrate.Up(database); err != nil {
+		log.Fatal(err)
+	}
+
+	addr := ":" + config.Getenv("PORT", "8080")
+	api := &api{db: database}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", health)
+	mux.HandleFunc("GET /health", api.health)
 
 	server := &http.Server{
 		Addr:              addr,
@@ -24,11 +44,28 @@ func main() {
 	log.Fatal(server.ListenAndServe())
 }
 
-func health(w http.ResponseWriter, _ *http.Request) {
+type api struct {
+	db *sql.DB
+}
+
+func (a *api) health(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	status := "ok"
+	if a.db != nil {
+		if err := a.db.Ping(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"status":  "down",
+				"service": "linkgym-api",
+				"db":      "down",
+			})
+			return
+		}
+	}
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status":  "ok",
+		"status":  status,
 		"service": "linkgym-api",
+		"db":      "ok",
 	})
 }
 
@@ -43,11 +80,4 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func getenv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

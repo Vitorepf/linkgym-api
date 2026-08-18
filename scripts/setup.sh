@@ -65,6 +65,13 @@ if [ "$ok" -ne 1 ]; then
 fi
 echo "MinIO :9000 ok"
 
+echo "migrations..."
+set -a
+# shellcheck disable=SC1091
+. ./.env
+set +a
+go run ./cmd/migrate
+
 go test ./...
 
 echo ""

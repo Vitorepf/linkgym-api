@@ -8,6 +8,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: linkgym
+          POSTGRES_PASSWORD: linkgym
+          POSTGRES_DB: linkgym
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linkgym -d linkgym"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://linkgym:linkgym@localhost:5432/linkgym?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
