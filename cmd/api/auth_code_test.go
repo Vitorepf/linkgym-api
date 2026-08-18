@@ -169,3 +169,59 @@ func TestOnboardingPutWritesJSON(t *testing.T) {
 		t.Fatal("PUT onboarding must set onboarding_complete")
 	}
 }
+
+func TestCommitmentLivesOnBond(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, seed.PhoneVitor)
+	t.Cleanup(func() {
+		_, _ = a.db.Exec(`
+			UPDATE bonds SET
+				commitment_text = NULL,
+				commitment_at = NULL,
+				onboarding = '{"experience":"training","days_per_week":3,"pain":false}'::jsonb
+			FROM people p
+			WHERE bonds.person_id = p.id AND p.phone = $1`,
+			seed.PhoneVitor,
+		)
+	})
+
+	bad := bytes.NewBufferString(`{"days_per_week":1}`)
+	badReq := httptest.NewRequest(http.MethodPut, "/v1/commitment", bad)
+	badReq.Header.Set("Authorization", "Bearer "+token)
+	badRec := httptest.NewRecorder()
+	a.withPerson(a.commitmentPut)(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status %d body %s", badRec.Code, badRec.Body.String())
+	}
+	if !bytes.Contains(badRec.Body.Bytes(), []byte(`"error":"invalido"`)) {
+		t.Fatalf("invalid body %s", badRec.Body.String())
+	}
+
+	body := bytes.NewBufferString(`{"days_per_week":3}`)
+	req := httptest.NewRequest(http.MethodPut, "/v1/commitment", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	a.withPerson(a.commitmentPut)(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	var text string
+	if err := a.db.QueryRow(`
+		SELECT b.commitment_text
+		FROM bonds b
+		JOIN people p ON p.id = b.person_id
+		WHERE p.phone = $1 AND p.active_bond_id = b.id`,
+		seed.PhoneVitor,
+	).Scan(&text); err != nil {
+		t.Fatal(err)
+	}
+	if text != "3 dias" {
+		t.Fatalf("commitment_text = %q, want 3 dias", text)
+	}
+
+	got := getMeFlags(t, a, token)
+	if !got.CommitmentComplete {
+		t.Fatal("PUT commitment must set commitment_complete")
+	}
+}

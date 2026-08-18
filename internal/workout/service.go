@@ -272,6 +272,15 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 		return nil, ErrEmptySession
 	}
 
+	var finishedBefore int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT count(*) FROM workout_sessions
+		WHERE person_id = $1 AND studio_id = $2 AND finished_at IS NOT NULL`,
+		personID, studioID,
+	).Scan(&finishedBefore); err != nil {
+		return nil, fmt.Errorf("finish debut count: %w", err)
+	}
+
 	now := s.now()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE workout_sessions
@@ -307,6 +316,20 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
 			badgeKeys = append(badgeKeys, "primeiro_pr")
+		}
+	}
+	if finishedBefore == 0 {
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO badges (studio_id, person_id, badge_key)
+			VALUES ($1, $2, 'estreia')
+			ON CONFLICT (studio_id, person_id, badge_key) DO NOTHING`,
+			studioID, personID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("finish estreia: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			badgeKeys = append(badgeKeys, "estreia")
 		}
 	}
 	for i := 0; i < prXP/25; i++ {

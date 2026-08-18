@@ -480,6 +480,99 @@ func exerciseIDByName(t *testing.T, database *sql.DB, name string) string {
 	return id
 }
 
+func TestDebutBadgeOnFirstFinish(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	personID := personIDByPhone(t, database, seed.PhoneJose)
+	ctx := context.Background()
+
+	if _, err := database.Exec(`DELETE FROM workout_sessions WHERE person_id = $1`, personID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`DELETE FROM badges WHERE person_id = $1 AND badge_key = 'estreia'`, personID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = database.Exec(`DELETE FROM workout_sessions WHERE person_id = $1`, personID)
+		_, _ = database.Exec(`DELETE FROM badges WHERE person_id = $1 AND badge_key = 'estreia'`, personID)
+	})
+
+	var prescriptionID, itemID, exerciseID string
+	var loadKg float64
+	if err := database.QueryRow(`
+		SELECT pr.id::text, pi.id::text, pi.exercise_id::text, pi.load_kg
+		FROM prescriptions pr
+		JOIN prescription_items pi ON pi.prescription_id = pr.id AND pi.position = 1
+		WHERE pr.person_id = $1 AND pr.for_date = current_date AND pr.status = 'published'`,
+		personID,
+	).Scan(&prescriptionID, &itemID, &exerciseID, &loadKg); err != nil {
+		t.Fatal(err)
+	}
+
+	finishOne := func() *FinishResult {
+		t.Helper()
+		started, err := svc.Start(ctx, personID, newUUID(), prescriptionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.AddSet(ctx, personID, started.ID, SetInput{
+			ClientSetID:        newUUID(),
+			PrescriptionItemID: itemID,
+			ExerciseID:         exerciseID,
+			SetIndex:           1,
+			Reps:               10,
+			LoadKg:             loadKg,
+			RestSeconds:        90,
+			PerformedAt:        time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := svc.Finish(ctx, personID, started.ID, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	first := finishOne()
+	if !hasBadge(first.BadgeKeys, "estreia") {
+		t.Fatalf("first badge_keys %+v, want estreia", first.BadgeKeys)
+	}
+	var key string
+	if err := database.QueryRow(`
+		SELECT badge_key FROM badges
+		WHERE person_id = $1 AND badge_key = 'estreia'`,
+		personID,
+	).Scan(&key); err != nil {
+		t.Fatalf("estreia row: %v", err)
+	}
+
+	second := finishOne()
+	if hasBadge(second.BadgeKeys, "estreia") {
+		t.Fatalf("second finish must not re-award estreia: %+v", second.BadgeKeys)
+	}
+	var n int
+	if err := database.QueryRow(`
+		SELECT count(*) FROM badges
+		WHERE person_id = $1 AND badge_key = 'estreia'`,
+		personID,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("estreia rows %d, want 1", n)
+	}
+}
+
+func hasBadge(keys []string, want string) bool {
+	for _, k := range keys {
+		if k == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestFinishForbiddenForOtherPerson(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)

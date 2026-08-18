@@ -64,6 +64,7 @@ func main() {
 	mux.HandleFunc("GET /v1/progress", api.withPerson(api.progressGet))
 	mux.HandleFunc("GET /v1/records", api.withPerson(api.recordsGet))
 	mux.HandleFunc("PUT /v1/onboarding", api.withPerson(api.onboardingPut))
+	mux.HandleFunc("PUT /v1/commitment", api.withPerson(api.commitmentPut))
 
 	server := &http.Server{
 		Addr:              addr,

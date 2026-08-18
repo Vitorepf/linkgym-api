@@ -75,3 +75,32 @@ func (s *Service) Put(ctx context.Context, personID string, in Answers) error {
 	}
 	return nil
 }
+
+type Commitment struct {
+	DaysPerWeek int `json:"days_per_week"`
+}
+
+func (s *Service) Commit(ctx context.Context, personID string, days int) error {
+	if days < 2 || days > 6 {
+		return ErrInvalid
+	}
+
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE bonds b
+		SET commitment_text = $2, commitment_at = $3, updated_at = now()
+		FROM people p
+		WHERE p.id = $1 AND b.id = p.active_bond_id AND b.role = 'student'`,
+		personID, fmt.Sprintf("%d dias", days), s.now(),
+	)
+	if err != nil {
+		return fmt.Errorf("commitment write: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("commitment rows: %w", err)
+	}
+	if n == 0 {
+		return ErrInvalid
+	}
+	return nil
+}
