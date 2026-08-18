@@ -24,9 +24,12 @@ func New(db *sql.DB, now func() time.Time) *Service {
 }
 
 type Answers struct {
-	Experience  string `json:"experience"`
-	DaysPerWeek int    `json:"days_per_week"`
-	Pain        bool   `json:"pain"`
+	Experience  string  `json:"experience"`
+	DaysPerWeek int     `json:"days_per_week"`
+	Pain        bool    `json:"pain"`
+	Sex         string  `json:"sex,omitempty"`
+	HeightCm    int     `json:"height_cm,omitempty"`
+	WeightKg    float64 `json:"weight_kg,omitempty"`
 }
 
 func (s *Service) Put(ctx context.Context, personID string, in Answers) error {
@@ -37,6 +40,17 @@ func (s *Service) Put(ctx context.Context, personID string, in Answers) error {
 	}
 	if in.DaysPerWeek < 2 || in.DaysPerWeek > 6 {
 		return ErrInvalid
+	}
+	if in.Sex != "" {
+		if in.Sex != "male" && in.Sex != "female" {
+			return ErrInvalid
+		}
+		if in.HeightCm < 140 || in.HeightCm > 210 {
+			return ErrInvalid
+		}
+		if in.WeightKg < 40 || in.WeightKg > 140 {
+			return ErrInvalid
+		}
 	}
 
 	payload, err := json.Marshal(in)
