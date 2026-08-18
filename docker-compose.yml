@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: linkgym
+      POSTGRES_PASSWORD: linkgym
+      POSTGRES_DB: linkgym
+    ports:
+      - "5436:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkgym -d linkgym"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: linkgym
+      MINIO_ROOT_PASSWORD: linkgymsecret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  createbucket:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      mc alias set local http://minio:9000 linkgym linkgymsecret;
+      mc mb --ignore-existing local/linkgym;
+      exit 0;
+      "
+
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      ENV: development
+      DATABASE_URL: postgres://linkgym:linkgym@postgres:5432/linkgym?sslmode=disable
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: linkgym
+      S3_ACCESS_KEY: linkgym
+      S3_SECRET_KEY: linkgymsecret
+      S3_USE_SSL: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+volumes:
+  pgdata:
+  miniodata:
