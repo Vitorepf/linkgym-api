@@ -32,22 +32,22 @@ func (a *api) comebackComplete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-type readinessReq struct {
+type prontidaoReq struct {
 	Energy   int `json:"energy"`
 	Soreness int `json:"soreness"`
 	Sleep    int `json:"sleep"`
 }
 
-func (a *api) todayReadinessPut(w http.ResponseWriter, r *http.Request) {
+func (a *api) todayProntidaoPut(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	var req readinessReq
+	var req prontidaoReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "json_invalido")
 		return
 	}
-	got, err := a.today.PutReadiness(r.Context(), sess.Person.ID, req.Energy, req.Soreness, req.Sleep)
+	got, err := a.today.PutProntidao(r.Context(), sess.Person.ID, req.Energy, req.Soreness, req.Sleep)
 	if err != nil {
-		if errors.Is(err, today.ErrReadinessInvalid) {
+		if errors.Is(err, today.ErrProntidaoInvalid) {
 			writeError(w, http.StatusBadRequest, "invalido")
 			return
 		}

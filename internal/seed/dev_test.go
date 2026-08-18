@@ -67,7 +67,7 @@ func TestDevSeedIsIdempotent(t *testing.T) {
 		JOIN people p ON p.id = b.person_id
 		JOIN studios s ON s.id = b.studio_id
 		WHERE s.name = $1 AND b.role = 'student' AND p.name IN ('Vitor', 'Huan', 'Jose')`,
-		StudioName,
+		TimeName,
 	).Scan(&students); err != nil {
 		t.Fatal(err)
 	}
@@ -75,17 +75,17 @@ func TestDevSeedIsIdempotent(t *testing.T) {
 		t.Fatalf("students = %d, want 3", students)
 	}
 
-	var studio, owner string
+	var timeName, owner string
 	if err := database.QueryRow(`
 		SELECT s.name, p.name
 		FROM studios s
 		JOIN people p ON p.id = s.owner_person_id
 		WHERE p.phone = $1`, PhoneFred,
-	).Scan(&studio, &owner); err != nil {
+	).Scan(&timeName, &owner); err != nil {
 		t.Fatal(err)
 	}
-	if studio != StudioName || owner != "Fred" {
-		t.Fatalf("studio=%s owner=%s", studio, owner)
+	if timeName != TimeName || owner != "Fred" {
+		t.Fatalf("time=%s owner=%s", timeName, owner)
 	}
 
 	var loads int

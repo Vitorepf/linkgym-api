@@ -25,15 +25,15 @@ type StudentCard struct {
 	Name       string     `json:"name"`
 	LastEffort *int       `json:"last_effort"`
 	LastLoads  []LastLoad `json:"last_loads"`
-	Streak     struct {
+	Ofensiva   struct {
 		CurrentCount int `json:"current_count"`
-	} `json:"streak"`
+	} `json:"ofensiva"`
 	Suggested      string  `json:"suggested"`
 	CommitmentText *string `json:"commitment_text"`
 }
 
 func (s *Service) Week(ctx context.Context, ownerID, from string) ([]WeekItem, error) {
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func weekStart(now time.Time, from string) (time.Time, error) {
 }
 
 func (s *Service) Approve(ctx context.Context, ownerID string, personIDs []string) (int, error) {
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return 0, err
 	}
@@ -251,7 +251,7 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 	if personID == "" {
 		return nil, ErrNotFound
 	}
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -288,8 +288,8 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT COALESCE(current_count, 0) FROM streaks WHERE bond_id = $1`,
 		bondID,
-	).Scan(&out.Streak.CurrentCount); err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("owner student streak: %w", err)
+	).Scan(&out.Ofensiva.CurrentCount); err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("owner student ofensiva: %w", err)
 	}
 
 	var effort sql.NullFloat64

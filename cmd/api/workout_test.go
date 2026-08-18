@@ -39,9 +39,9 @@ func TestSessionForbiddenForOtherPerson(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clientID := fmt.Sprintf("aaaaaaaa-bbbb-4ccc-8ddd-%012d", time.Now().UnixNano()%1e12)
+	localID := fmt.Sprintf("aaaaaaaa-bbbb-4ccc-8ddd-%012d", time.Now().UnixNano()%1e12)
 	startBody, _ := json.Marshal(map[string]string{
-		"client_id":       clientID,
+		"local_id":        localID,
 		"prescription_id": prescriptionID,
 	})
 	startReq := httptest.NewRequest(http.MethodPost, "/v1/sessions", bytes.NewBuffer(startBody))

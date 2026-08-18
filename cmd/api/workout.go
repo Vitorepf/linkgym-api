@@ -10,12 +10,12 @@ import (
 )
 
 type startReq struct {
-	ClientID       string `json:"client_id"`
+	LocalID        string `json:"local_id"`
 	PrescriptionID string `json:"prescription_id"`
 }
 
 type setReq struct {
-	ClientSetID           string  `json:"client_set_id"`
+	LocalID               string  `json:"local_id"`
 	PrescriptionItemID    string  `json:"prescription_item_id"`
 	ExerciseID            string  `json:"exercise_id"`
 	SwappedFromExerciseID *string `json:"swapped_from_exercise_id"`
@@ -38,7 +38,7 @@ func (a *api) sessionStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "json_invalido")
 		return
 	}
-	got, err := a.workout.Start(r.Context(), sess.Person.ID, req.ClientID, req.PrescriptionID)
+	got, err := a.workout.Start(r.Context(), sess.Person.ID, req.LocalID, req.PrescriptionID)
 	if err != nil {
 		writeWorkoutError(w, err)
 		return
@@ -63,7 +63,7 @@ func (a *api) sessionAddSet(w http.ResponseWriter, r *http.Request) {
 		performed = t
 	}
 	got, err := a.workout.AddSet(r.Context(), sess.Person.ID, r.PathValue("id"), workout.SetInput{
-		ClientSetID:           req.ClientSetID,
+		LocalID:               req.LocalID,
 		PrescriptionItemID:    req.PrescriptionItemID,
 		ExerciseID:            req.ExerciseID,
 		SwappedFromExerciseID: req.SwappedFromExerciseID,

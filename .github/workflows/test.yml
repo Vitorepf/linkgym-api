@@ -29,4 +29,5 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - run: go test ./...
+      # -p 1: os pacotes de teste compartilham um Postgres e se re-semeiam em paralelo.
+      - run: go test -p 1 ./...

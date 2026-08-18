@@ -55,7 +55,7 @@ func main() {
 	mux.HandleFunc("GET /v1/me", api.me)
 	mux.HandleFunc("POST /v1/auth/logout", api.logout)
 	mux.HandleFunc("GET /v1/today", api.withPerson(api.todayGet))
-	mux.HandleFunc("PUT /v1/today/readiness", api.withPerson(api.todayReadinessPut))
+	mux.HandleFunc("PUT /v1/today/prontidao", api.withPerson(api.todayProntidaoPut))
 	mux.HandleFunc("GET /v1/owner/home", api.withPerson(api.ownerHome))
 	mux.HandleFunc("GET /v1/owner/attention", api.withPerson(api.ownerAttention))
 	mux.HandleFunc("POST /v1/owner/attention/{id}/apply", api.withPerson(api.ownerApplyAttention))

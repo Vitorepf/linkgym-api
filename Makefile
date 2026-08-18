@@ -33,8 +33,10 @@ migrate:
 seed:
 	go run ./cmd/seed
 
+# -p 1: os 15 pacotes de teste abrem o MESMO DATABASE_URL e re-semeiam por cima uns dos
+# outros em paralelo. Serial passa sempre; paralelo falha em rodadas alternadas.
 test:
-	set -a; [ -f .env ] && . ./.env; set +a; go test ./...
+	set -a; [ -f .env ] && . ./.env; set +a; go test -p 1 ./...
 
 tidy:
 	go mod tidy

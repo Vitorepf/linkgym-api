@@ -74,8 +74,8 @@ func TestVitorLogsInWithDevCode(t *testing.T) {
 	if session.Person.Name != "Vitor" {
 		t.Fatalf("name = %s", session.Person.Name)
 	}
-	if session.Studio.Name != seed.StudioName {
-		t.Fatalf("studio = %s", session.Studio.Name)
+	if session.Time.Name != seed.TimeName {
+		t.Fatalf("time = %s", session.Time.Name)
 	}
 	if session.Token == "" {
 		t.Fatal("missing token")

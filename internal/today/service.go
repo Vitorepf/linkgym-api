@@ -23,10 +23,10 @@ func New(db *sql.DB, now func() time.Time) *Service {
 }
 
 type Payload struct {
-	Studio       Studio        `json:"studio"`
+	Time         Time          `json:"time"`
 	Person       Person        `json:"person"`
-	Readiness    Readiness     `json:"readiness"`
-	Streak       Streak        `json:"streak"`
+	Prontidao    Prontidao     `json:"prontidao"`
+	Ofensiva     Ofensiva      `json:"ofensiva"`
 	XPTotal      int           `json:"xp_total"`
 	Prescription *Prescription `json:"prescription"`
 	Banner       *Banner       `json:"banner"`
@@ -35,7 +35,7 @@ type Payload struct {
 	Comeback     *Comeback     `json:"comeback"`
 }
 
-type Studio struct {
+type Time struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	AccentColor string `json:"accent_color"`
@@ -46,7 +46,7 @@ type Person struct {
 	Name string `json:"name"`
 }
 
-type Readiness struct {
+type Prontidao struct {
 	Score    int    `json:"score"`
 	Energy   int    `json:"energy"`
 	Soreness int    `json:"soreness"`
@@ -54,7 +54,7 @@ type Readiness struct {
 	Label    string `json:"label"`
 }
 
-type Streak struct {
+type Ofensiva struct {
 	CurrentCount       int  `json:"current_count"`
 	ProtectorAvailable bool `json:"protector_available"`
 }
@@ -110,17 +110,17 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		personID,
 	).Scan(
 		&out.Person.ID, &out.Person.Name,
-		&out.Studio.ID, &out.Studio.Name, &out.Studio.AccentColor,
+		&out.Time.ID, &out.Time.Name, &out.Time.AccentColor,
 		&bondID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("today person: %w", err)
 	}
 
-	if err := s.applyYesterdayMiss(ctx, personID, out.Studio.ID, bondID, now); err != nil {
+	if err := s.applyYesterdayMiss(ctx, personID, out.Time.ID, bondID, now); err != nil {
 		return nil, err
 	}
-	if err := s.openD11Comeback(ctx, personID, out.Studio.ID, bondID, now); err != nil {
+	if err := s.openD11Comeback(ctx, personID, out.Time.ID, bondID, now); err != nil {
 		return nil, err
 	}
 
@@ -130,12 +130,12 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		LEFT JOIN streaks st ON st.bond_id = p.active_bond_id
 		WHERE p.id = $1`,
 		personID,
-	).Scan(&out.Streak.CurrentCount, &out.Streak.ProtectorAvailable)
+	).Scan(&out.Ofensiva.CurrentCount, &out.Ofensiva.ProtectorAvailable)
 	if err != nil {
-		return nil, fmt.Errorf("today streak: %w", err)
+		return nil, fmt.Errorf("today ofensiva: %w", err)
 	}
 
-	out.Readiness = Readiness{Score: 0, Label: "Como você está?"}
+	out.Prontidao = Prontidao{Score: 0, Label: "Como você está?"}
 	var energy, soreness, sleep sql.NullInt64
 	err = s.db.QueryRowContext(ctx, `
 		SELECT energy, soreness, sleep
@@ -144,10 +144,10 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		personID, day,
 	).Scan(&energy, &soreness, &sleep)
 	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("today readiness: %w", err)
+		return nil, fmt.Errorf("today prontidao: %w", err)
 	}
 	if err == nil && energy.Valid && soreness.Valid && sleep.Valid {
-		out.Readiness = readinessFrom(int(energy.Int64), int(soreness.Int64), int(sleep.Int64))
+		out.Prontidao = prontidaoFrom(int(energy.Int64), int(soreness.Int64), int(sleep.Int64))
 	}
 
 	if err := s.db.QueryRowContext(ctx, `
@@ -161,7 +161,7 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT count(*) FROM workout_sessions
 		WHERE person_id = $1 AND studio_id = $2 AND finished_at IS NOT NULL`,
-		personID, out.Studio.ID,
+		personID, out.Time.ID,
 	).Scan(&finished); err != nil {
 		return nil, fmt.Errorf("today debut: %w", err)
 	}
@@ -183,7 +183,7 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		JOIN models m ON m.id = pr.model_id
 		WHERE pr.person_id = $1 AND pr.studio_id = $2
 		  AND pr.for_date = $3 AND pr.status = 'published'`,
-		personID, out.Studio.ID, day,
+		personID, out.Time.ID, day,
 	).Scan(&prID, &prName, &prDate)
 	if err == sql.ErrNoRows {
 		return &out, nil
@@ -204,7 +204,7 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		Items:   items,
 	}
 	out.Banner = &Banner{
-		Text: fmt.Sprintf("%s publicou o %s", out.Studio.Name, prName),
+		Text: fmt.Sprintf("%s publicou o %s", out.Time.Name, prName),
 		Kind: "published",
 	}
 	if len(items) > 0 {
@@ -264,7 +264,7 @@ func (s *Service) loadItems(ctx context.Context, prescriptionID string) ([]Item,
 }
 
 var (
-	ErrReadinessInvalid = errors.New("invalido")
+	ErrProntidaoInvalid = errors.New("invalido")
 	ErrNotFound         = errors.New("nao_encontrado")
 )
 
@@ -312,7 +312,7 @@ func (s *Service) applyYesterdayMiss(ctx context.Context, personID, studioID, bo
 		ON CONFLICT (bond_id) DO NOTHING`,
 		bondID,
 	); err != nil {
-		return fmt.Errorf("today miss streak insert: %w", err)
+		return fmt.Errorf("today miss ofensiva insert: %w", err)
 	}
 
 	var (
@@ -329,7 +329,7 @@ func (s *Service) applyYesterdayMiss(ctx context.Context, personID, studioID, bo
 		FOR UPDATE`,
 		bondID, today,
 	).Scan(&count, &protector, &spentToday, &updatedToday); err != nil {
-		return fmt.Errorf("today miss streak: %w", err)
+		return fmt.Errorf("today miss ofensiva: %w", err)
 	}
 	if spentToday || (count == 0 && !protector && updatedToday) {
 		return nil
@@ -367,7 +367,7 @@ func (s *Service) openD11Comeback(ctx context.Context, personID, studioID, bondI
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("today d11 streak: %w", err)
+		return fmt.Errorf("today d11 ofensiva: %w", err)
 	}
 
 	anchor := lastFulfilled
@@ -491,9 +491,9 @@ func (s *Service) CompleteComeback(ctx context.Context, personID, comebackID str
 	return tx.Commit()
 }
 
-func (s *Service) PutReadiness(ctx context.Context, personID string, energy, soreness, sleep int) (Readiness, error) {
+func (s *Service) PutProntidao(ctx context.Context, personID string, energy, soreness, sleep int) (Prontidao, error) {
 	if !inScale(energy) || !inScale(soreness) || !inScale(sleep) {
-		return Readiness{}, ErrReadinessInvalid
+		return Prontidao{}, ErrProntidaoInvalid
 	}
 	day := s.now().Format("2006-01-02")
 	_, err := s.db.ExecContext(ctx, `
@@ -506,18 +506,18 @@ func (s *Service) PutReadiness(ctx context.Context, personID string, energy, sor
 		personID, day, energy, soreness, sleep,
 	)
 	if err != nil {
-		return Readiness{}, fmt.Errorf("put readiness: %w", err)
+		return Prontidao{}, fmt.Errorf("put prontidao: %w", err)
 	}
-	return readinessFrom(energy, soreness, sleep), nil
+	return prontidaoFrom(energy, soreness, sleep), nil
 }
 
 func inScale(n int) bool {
 	return n >= 1 && n <= 5
 }
 
-func readinessFrom(energy, soreness, sleep int) Readiness {
+func prontidaoFrom(energy, soreness, sleep int) Prontidao {
 	n := score(energy, soreness, sleep)
-	return Readiness{
+	return Prontidao{
 		Score:    n,
 		Energy:   energy,
 		Soreness: soreness,

@@ -214,9 +214,9 @@ func TestOfflineSessionUpdatesFio(t *testing.T) {
 	svc := workout.New(database, time.Now)
 	personID, prescriptionID, itemID, exerciseID, loadKg := vitorSupinoToday(t, database)
 	ctx := context.Background()
-	clientID := newUUID()
+	localID := newUUID()
 
-	started, err := svc.Start(ctx, personID, clientID, prescriptionID)
+	started, err := svc.Start(ctx, personID, localID, prescriptionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestOfflineSessionUpdatesFio(t *testing.T) {
 	})
 
 	if _, err := svc.AddSet(ctx, personID, started.ID, workout.SetInput{
-		ClientSetID:        newUUID(),
+		LocalID:            newUUID(),
 		PrescriptionItemID: itemID,
 		ExerciseID:         exerciseID,
 		SetIndex:           1,
@@ -261,7 +261,7 @@ func TestOfflineSessionUpdatesFio(t *testing.T) {
 	}
 }
 
-func TestSwitchingStudioKeepsPRs(t *testing.T) {
+func TestSwitchingTimeKeepsPRs(t *testing.T) {
 	database := openSeeded(t)
 	ctx := context.Background()
 	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
@@ -289,11 +289,11 @@ func TestSwitchingStudioKeepsPRs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if prsBefore < 1 {
-		t.Fatal("need a PR before switching studio")
+		t.Fatal("need a PR before switching time")
 	}
 
 	ownerPhone := uniquePhone(2)
-	studioName := fmt.Sprintf("Iron Loop %d", time.Now().UnixNano()%1e9)
+	timeName := fmt.Sprintf("Iron Loop %d", time.Now().UnixNano()%1e9)
 
 	var ownerID, studioID, ownerBondID, newBondID string
 	if err := database.QueryRow(`
@@ -305,7 +305,7 @@ func TestSwitchingStudioKeepsPRs(t *testing.T) {
 	if err := database.QueryRow(`
 		INSERT INTO studios (owner_person_id, name, accent_color)
 		VALUES ($1, $2, '#112233') RETURNING id::text`,
-		ownerID, studioName,
+		ownerID, timeName,
 	).Scan(&studioID); err != nil {
 		t.Fatal(err)
 	}
@@ -354,17 +354,17 @@ func TestSwitchingStudioKeepsPRs(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("PR missing after studio switch: %+v", recs.Items)
+		t.Fatalf("PR missing after time switch: %+v", recs.Items)
 	}
 
 	got, err := today.New(database, time.Now).Today(ctx, vitorID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Studio.Name != studioName {
-		t.Fatalf("today studio %q want %q", got.Studio.Name, studioName)
+	if got.Time.Name != timeName {
+		t.Fatalf("today time %q want %q", got.Time.Name, timeName)
 	}
-	if got.Studio.Name == seed.StudioName {
+	if got.Time.Name == seed.TimeName {
 		t.Fatal("today still showing Fred")
 	}
 
@@ -395,7 +395,7 @@ func bondIDOf(t *testing.T, database *sql.DB, personID string) string {
 	return id
 }
 
-func restoreVitorStreak(t *testing.T, database *sql.DB, vitorID string) {
+func restoreVitorOfensiva(t *testing.T, database *sql.DB, vitorID string) {
 	t.Helper()
 	t.Cleanup(func() {
 		_, _ = database.Exec(`DELETE FROM comebacks WHERE bond_id = (SELECT active_bond_id FROM people WHERE id = $1)`, vitorID)
@@ -456,7 +456,7 @@ func clonePublishedOn(t *testing.T, database *sql.DB, personID, forDate string) 
 func TestComebackDoesNotWipeArchive(t *testing.T) {
 	database := openSeeded(t)
 	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
-	restoreVitorStreak(t, database, vitorID)
+	restoreVitorOfensiva(t, database, vitorID)
 	bondID := bondIDOf(t, database, vitorID)
 
 	day := pgToday(t, database)

@@ -25,7 +25,7 @@ func (a *api) requestCode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "json_invalido")
 		return
 	}
-	devCode, studio, err := a.auth.RequestCode(r.Context(), req.Phone, req.InviteCode)
+	devCode, tm, err := a.auth.RequestCode(r.Context(), req.Phone, req.InviteCode)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -34,8 +34,8 @@ func (a *api) requestCode(w http.ResponseWriter, r *http.Request) {
 	if devCode != "" {
 		out["dev_code"] = devCode
 	}
-	if studio != nil {
-		out["studio"] = studio
+	if tm != nil {
+		out["time"] = tm
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -54,7 +54,7 @@ func (a *api) verify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":  session.Token,
 		"person": session.Person,
-		"studio": session.Studio,
+		"time":   session.Time,
 	})
 }
 
@@ -66,7 +66,7 @@ func (a *api) me(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"person":              session.Person,
-		"studio":              session.Studio,
+		"time":                session.Time,
 		"onboarding_complete": session.OnboardingComplete,
 		"commitment_complete": session.CommitmentComplete,
 		"debut":               session.Debut,

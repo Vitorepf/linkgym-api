@@ -10,7 +10,7 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/seed"
 )
 
-func TestCodeWithInviteReturnsStudioNameFred(t *testing.T) {
+func TestCodeWithInviteReturnsTimeNameFred(t *testing.T) {
 	a := testAPI(t)
 	const phone = "+5511900000099"
 	const invite = "FRED-NOVO"
@@ -40,24 +40,24 @@ func TestCodeWithInviteReturnsStudioNameFred(t *testing.T) {
 	}
 
 	var out struct {
-		OK     bool `json:"ok"`
-		Studio *struct {
+		OK   bool `json:"ok"`
+		Time *struct {
 			ID     string `json:"id"`
 			Name   string `json:"name"`
 			Accent string `json:"accent_color"`
-		} `json:"studio"`
+		} `json:"time"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Studio == nil {
-		t.Fatalf("missing studio: %s", rec.Body.String())
+	if out.Time == nil {
+		t.Fatalf("missing time: %s", rec.Body.String())
 	}
-	if out.Studio.Name != "Fred" {
-		t.Fatalf("studio.name = %q, want Fred", out.Studio.Name)
+	if out.Time.Name != "Fred" {
+		t.Fatalf("time.name = %q, want Fred", out.Time.Name)
 	}
-	if out.Studio.ID == "" || out.Studio.Accent == "" {
-		t.Fatalf("studio = %+v", out.Studio)
+	if out.Time.ID == "" || out.Time.Accent == "" {
+		t.Fatalf("time = %+v", out.Time)
 	}
 }
 

@@ -63,7 +63,7 @@ func TestBatchPrescriptionsKeepDifferentLoads(t *testing.T) {
 	mustExec(t, tx, `INSERT INTO people (phone, name) VALUES ('+5511990000001', 'Personal') RETURNING id`, &personalID)
 	mustExec(t, tx, `INSERT INTO people (phone, name) VALUES ('+5511990000002', 'Aluna A') RETURNING id`, &studentA)
 	mustExec(t, tx, `INSERT INTO people (phone, name) VALUES ('+5511990000003', 'Aluna B') RETURNING id`, &studentB)
-	mustExec(t, tx, `INSERT INTO studios (owner_person_id, name, accent_color) VALUES ($1, 'Studio X', '#ec3013') RETURNING id`, &studioID, personalID)
+	mustExec(t, tx, `INSERT INTO studios (owner_person_id, name, accent_color) VALUES ($1, 'Time X', '#ec3013') RETURNING id`, &studioID, personalID)
 	mustExec(t, tx, `INSERT INTO bonds (person_id, studio_id, role, status) VALUES ($1, $2, 'owner', 'active')`, nil, personalID, studioID)
 	mustExec(t, tx, `INSERT INTO bonds (person_id, studio_id, role, status) VALUES ($1, $2, 'student', 'active')`, nil, studentA, studioID)
 	mustExec(t, tx, `INSERT INTO bonds (person_id, studio_id, role, status) VALUES ($1, $2, 'student', 'active')`, nil, studentB, studioID)
@@ -105,7 +105,7 @@ func TestPhoneIsUniqueToThePerson(t *testing.T) {
 	}
 }
 
-func TestPRBelongsToPersonNotStudio(t *testing.T) {
+func TestPRBelongsToPersonNotTime(t *testing.T) {
 	database := openTestDB(t)
 	tx, err := database.Begin()
 	if err != nil {
@@ -119,20 +119,20 @@ func TestPRBelongsToPersonNotStudio(t *testing.T) {
 	mustExec(t, tx, `INSERT INTO exercises (studio_id, name) VALUES ($1, 'Terra') RETURNING id`, &exerciseID, studioID)
 	mustExec(t, tx, `INSERT INTO personal_records (person_id, exercise_id, load_kg, reps) VALUES ($1, $2, 100, 5)`, nil, personID, exerciseID)
 
-	var studioCol int
+	var timeCol int
 	err = tx.QueryRow(`
 		SELECT count(*) FROM information_schema.columns
 		WHERE table_name = 'personal_records' AND column_name = 'studio_id'
-	`).Scan(&studioCol)
+	`).Scan(&timeCol)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if studioCol != 0 {
+	if timeCol != 0 {
 		t.Fatal("PR não pode ter studio_id — o recorde é da pessoa")
 	}
 }
 
-func TestStreakLivesOnTheBond(t *testing.T) {
+func TestOfensivaLivesOnTheBond(t *testing.T) {
 	database := openTestDB(t)
 	var column string
 	err := database.QueryRow(`

@@ -60,7 +60,7 @@ func personIDByPhone(t *testing.T, database *sql.DB, phone string) string {
 	return id
 }
 
-func TestReadinessScore(t *testing.T) {
+func TestProntidaoScore(t *testing.T) {
 	if g := score(4, 2, 4); g != 80 {
 		t.Fatalf("%d", g)
 	}
@@ -72,12 +72,12 @@ func TestReadinessScore(t *testing.T) {
 	}
 }
 
-func TestReadinessUpsert(t *testing.T) {
+func TestProntidaoUpsert(t *testing.T) {
 	db := openSeeded(t)
 	svc := New(db, time.Now)
 	vitorID := personIDByPhone(t, db, "+5511900000002")
 
-	got, err := svc.PutReadiness(context.Background(), vitorID, 4, 2, 4)
+	got, err := svc.PutProntidao(context.Background(), vitorID, 4, 2, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,11 +92,11 @@ func TestReadinessUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if today.Readiness.Score != 80 || today.Readiness.Label != "Pode ir com carga" {
-		t.Fatalf("today after save %+v", today.Readiness)
+	if today.Prontidao.Score != 80 || today.Prontidao.Label != "Pode ir com carga" {
+		t.Fatalf("today after save %+v", today.Prontidao)
 	}
 
-	got, err = svc.PutReadiness(context.Background(), vitorID, 1, 5, 1)
+	got, err = svc.PutProntidao(context.Background(), vitorID, 1, 5, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,14 +105,14 @@ func TestReadinessUpsert(t *testing.T) {
 	}
 }
 
-func TestReadinessUpsertRejectsOutOfRange(t *testing.T) {
+func TestProntidaoUpsertRejectsOutOfRange(t *testing.T) {
 	db := openSeeded(t)
 	svc := New(db, time.Now)
 	vitorID := personIDByPhone(t, db, "+5511900000002")
-	if _, err := svc.PutReadiness(context.Background(), vitorID, 0, 3, 3); err != ErrReadinessInvalid {
+	if _, err := svc.PutProntidao(context.Background(), vitorID, 0, 3, 3); err != ErrProntidaoInvalid {
 		t.Fatalf("got %v", err)
 	}
-	if _, err := svc.PutReadiness(context.Background(), vitorID, 6, 3, 3); err != ErrReadinessInvalid {
+	if _, err := svc.PutProntidao(context.Background(), vitorID, 6, 3, 3); err != ErrProntidaoInvalid {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -148,7 +148,7 @@ func bondIDOf(t *testing.T, database *sql.DB, personID string) string {
 	return id
 }
 
-func restoreVitorStreak(t *testing.T, database *sql.DB, vitorID string) {
+func restoreVitorOfensiva(t *testing.T, database *sql.DB, vitorID string) {
 	t.Helper()
 	t.Cleanup(func() {
 		_, _ = database.Exec(`DELETE FROM comebacks WHERE bond_id = (SELECT active_bond_id FROM people WHERE id = $1)`, vitorID)
@@ -209,7 +209,7 @@ func clonePublishedOn(t *testing.T, database *sql.DB, personID, forDate string) 
 func TestFirstMissSpendsProtector(t *testing.T) {
 	database := openSeeded(t)
 	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
-	restoreVitorStreak(t, database, vitorID)
+	restoreVitorOfensiva(t, database, vitorID)
 	bondID := bondIDOf(t, database, vitorID)
 
 	day := pgToday(t, database)
@@ -231,16 +231,16 @@ func TestFirstMissSpendsProtector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Streak.ProtectorAvailable || got.Streak.CurrentCount != 4 {
-		t.Fatalf("first today %+v", got.Streak)
+	if got.Ofensiva.ProtectorAvailable || got.Ofensiva.CurrentCount != 4 {
+		t.Fatalf("first today %+v", got.Ofensiva)
 	}
 
 	again, err := svc.Today(context.Background(), vitorID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Streak.ProtectorAvailable || again.Streak.CurrentCount != 4 {
-		t.Fatalf("second today same day %+v", again.Streak)
+	if again.Ofensiva.ProtectorAvailable || again.Ofensiva.CurrentCount != 4 {
+		t.Fatalf("second today same day %+v", again.Ofensiva)
 	}
 
 	clock = day.AddDate(0, 0, 1)
@@ -255,22 +255,22 @@ func TestFirstMissSpendsProtector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Streak.ProtectorAvailable || next.Streak.CurrentCount != 4 {
-		t.Fatalf("day after first miss %+v", next.Streak)
+	if next.Ofensiva.ProtectorAvailable || next.Ofensiva.CurrentCount != 4 {
+		t.Fatalf("day after first miss %+v", next.Ofensiva)
 	}
 	twice, err := svc.Today(context.Background(), vitorID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if twice.Streak.ProtectorAvailable || twice.Streak.CurrentCount != 4 {
-		t.Fatalf("day after first miss twice %+v", twice.Streak)
+	if twice.Ofensiva.ProtectorAvailable || twice.Ofensiva.CurrentCount != 4 {
+		t.Fatalf("day after first miss twice %+v", twice.Ofensiva)
 	}
 }
 
-func TestSecondMissZerosStreak(t *testing.T) {
+func TestSecondMissZerosOfensiva(t *testing.T) {
 	database := openSeeded(t)
 	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
-	restoreVitorStreak(t, database, vitorID)
+	restoreVitorOfensiva(t, database, vitorID)
 	bondID := bondIDOf(t, database, vitorID)
 
 	day := pgToday(t, database)
@@ -297,15 +297,15 @@ func TestSecondMissZerosStreak(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Streak.CurrentCount != 0 || got.Streak.ProtectorAvailable {
-		t.Fatalf("second miss %+v", got.Streak)
+	if got.Ofensiva.CurrentCount != 0 || got.Ofensiva.ProtectorAvailable {
+		t.Fatalf("second miss %+v", got.Ofensiva)
 	}
 }
 
 func TestD11OpensComebackWithoutWipingPR(t *testing.T) {
 	database := openSeeded(t)
 	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
-	restoreVitorStreak(t, database, vitorID)
+	restoreVitorOfensiva(t, database, vitorID)
 	bondID := bondIDOf(t, database, vitorID)
 
 	day := pgToday(t, database)

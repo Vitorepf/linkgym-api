@@ -386,7 +386,7 @@ func TestStudentCardNudgeForJose(t *testing.T) {
 	}
 }
 
-func TestStudentCardNotFoundOutsideStudio(t *testing.T) {
+func TestStudentCardNotFoundOutsideTime(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
 	fredID := personIDByPhone(t, database, seed.PhoneFred)

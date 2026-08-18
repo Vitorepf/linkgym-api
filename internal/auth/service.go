@@ -25,7 +25,7 @@ func New(db *sql.DB, pepper string, dev bool) *Service {
 type Session struct {
 	Token              string
 	Person             Person
-	Studio             Studio
+	Time               Time
 	OnboardingComplete bool
 	CommitmentComplete bool
 	Debut              bool
@@ -38,13 +38,13 @@ type Person struct {
 	Role  string `json:"role"`
 }
 
-type Studio struct {
+type Time struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Accent string `json:"accent_color"`
 }
 
-func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (devCode string, studio *Studio, err error) {
+func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (devCode string, tm *Time, err error) {
 	phone, err := NormalizePhone(rawPhone)
 	if err != nil {
 		return "", nil, err
@@ -74,7 +74,7 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 	}
 
 	if invite != "" {
-		var st Studio
+		var st Time
 		err = s.db.QueryRowContext(ctx, `
 			SELECT s.id::text, s.name, s.accent_color
 			FROM invites i
@@ -83,10 +83,10 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 			invite, s.now(),
 		).Scan(&st.ID, &st.Name, &st.Accent)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return "", nil, fmtErr("invite studio", err)
+			return "", nil, fmtErr("invite time", err)
 		}
 		if err == nil {
-			studio = &st
+			tm = &st
 		}
 	}
 
@@ -115,9 +115,9 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 	}
 
 	if s.dev {
-		return code, studio, nil
+		return code, tm, nil
 	}
-	return "", studio, nil
+	return "", tm, nil
 }
 
 func (s *Service) Verify(ctx context.Context, rawPhone, code, invite string) (*Session, error) {
@@ -306,7 +306,7 @@ func (s *Service) loadSession(ctx context.Context, personID string) (*Session, e
 		personID,
 	).Scan(
 		&out.Person.ID, &out.Person.Name, &out.Person.Phone, &out.Person.Role,
-		&out.Studio.ID, &out.Studio.Name, &out.Studio.Accent,
+		&out.Time.ID, &out.Time.Name, &out.Time.Accent,
 		&out.OnboardingComplete, &out.CommitmentComplete, &out.Debut,
 	)
 	if err != nil {

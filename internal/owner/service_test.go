@@ -119,7 +119,7 @@ func finishVitorSession(t *testing.T, database *sql.DB) string {
 		t.Fatal(err)
 	}
 	if _, err := wk.AddSet(ctx, vitorID, started.ID, workout.SetInput{
-		ClientSetID:        newUUID(),
+		LocalID:            newUUID(),
 		PrescriptionItemID: itemID,
 		ExerciseID:         exerciseID,
 		SetIndex:           1,

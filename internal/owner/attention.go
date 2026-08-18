@@ -7,7 +7,7 @@ import (
 )
 
 func (s *Service) Attention(ctx context.Context, ownerID string) ([]Attention, error) {
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func (s *Service) Apply(ctx context.Context, ownerID, attentionID string) error 
 	if attentionID == "" {
 		return ErrInvalid
 	}
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return err
 	}

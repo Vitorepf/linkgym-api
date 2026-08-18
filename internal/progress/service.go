@@ -21,14 +21,14 @@ func New(db *sql.DB, now func() time.Time) *Service {
 }
 
 type Payload struct {
-	Streak        Streak         `json:"streak"`
+	Ofensiva      Ofensiva       `json:"ofensiva"`
 	XPTotal       int            `json:"xp_total"`
 	League        []LeagueRow    `json:"league"`
 	Badges        []Badge        `json:"badges"`
-	ReadinessWeek []ReadinessDay `json:"readiness_week"`
+	ProntidaoWeek []ProntidaoDay `json:"prontidao_week"`
 }
 
-type Streak struct {
+type Ofensiva struct {
 	CurrentCount       int  `json:"current_count"`
 	ProtectorAvailable bool `json:"protector_available"`
 }
@@ -44,7 +44,7 @@ type Badge struct {
 	EarnedAt time.Time `json:"earned_at"`
 }
 
-type ReadinessDay struct {
+type ProntidaoDay struct {
 	ForDate string `json:"for_date"`
 	Score   int    `json:"score"`
 }
@@ -81,7 +81,7 @@ func (s *Service) Get(ctx context.Context, personID string) (*Payload, error) {
 		LEFT JOIN streaks st ON st.bond_id = b.id
 		WHERE p.id = $1`,
 		personID,
-	).Scan(&bondID, &studioID, &out.Streak.CurrentCount, &out.Streak.ProtectorAvailable)
+	).Scan(&bondID, &studioID, &out.Ofensiva.CurrentCount, &out.Ofensiva.ProtectorAvailable)
 	if err != nil {
 		return nil, fmt.Errorf("progress person: %w", err)
 	}
@@ -105,11 +105,11 @@ func (s *Service) Get(ctx context.Context, personID string) (*Payload, error) {
 	}
 	out.Badges = badges
 
-	week, err := s.readinessWeek(ctx, personID)
+	week, err := s.prontidaoWeek(ctx, personID)
 	if err != nil {
 		return nil, err
 	}
-	out.ReadinessWeek = week
+	out.ProntidaoWeek = week
 	return &out, nil
 }
 
@@ -165,7 +165,7 @@ func (s *Service) badges(ctx context.Context, studioID, personID string) ([]Badg
 	return out, rows.Err()
 }
 
-func (s *Service) readinessWeek(ctx context.Context, personID string) ([]ReadinessDay, error) {
+func (s *Service) prontidaoWeek(ctx context.Context, personID string) ([]ProntidaoDay, error) {
 	day := s.now().Format("2006-01-02")
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT d::date::text, r.energy, r.soreness, r.sleep
@@ -175,18 +175,18 @@ func (s *Service) readinessWeek(ctx context.Context, personID string) ([]Readine
 		personID, day,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("progress readiness: %w", err)
+		return nil, fmt.Errorf("progress prontidao: %w", err)
 	}
 	defer rows.Close()
 
-	out := []ReadinessDay{}
+	out := []ProntidaoDay{}
 	for rows.Next() {
 		var (
-			row                     ReadinessDay
+			row                     ProntidaoDay
 			energy, soreness, sleep sql.NullInt64
 		)
 		if err := rows.Scan(&row.ForDate, &energy, &soreness, &sleep); err != nil {
-			return nil, fmt.Errorf("progress readiness scan: %w", err)
+			return nil, fmt.Errorf("progress prontidao scan: %w", err)
 		}
 		if energy.Valid && soreness.Valid && sleep.Valid {
 			row.Score = int(math.Round(float64(int(energy.Int64)+(6-int(soreness.Int64))+int(sleep.Int64)) / 15.0 * 100))

@@ -61,7 +61,7 @@ type ItemPatch struct {
 	PlannedReps string  `json:"planned_reps"`
 }
 
-func (s *Service) ownerStudio(ctx context.Context, personID string) (string, error) {
+func (s *Service) ownerTime(ctx context.Context, personID string) (string, error) {
 	var role, studioID string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT b.role, b.studio_id::text
@@ -83,7 +83,7 @@ func (s *Service) ownerStudio(ctx context.Context, personID string) (string, err
 }
 
 func (s *Service) ListModels(ctx context.Context, ownerID string) ([]Model, error) {
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (s *Service) GetModel(ctx context.Context, ownerID, modelID string) (*Model
 	if modelID == "" {
 		return nil, ErrNotFound
 	}
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (s *Service) DraftFromLast(ctx context.Context, ownerID, modelID, personID,
 	if from != "last" && from != "model" {
 		return nil, ErrInvalid
 	}
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,14 +183,14 @@ func (s *Service) DraftFromLast(ctx context.Context, ownerID, modelID, personID,
 		return nil, ErrNotFound
 	}
 
-	var studioMatch int
+	var timeMatch int
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT count(*) FROM models WHERE id = $1 AND studio_id = $2`,
 		modelID, studioID,
-	).Scan(&studioMatch); err != nil {
+	).Scan(&timeMatch); err != nil {
 		return nil, fmt.Errorf("publish draft model: %w", err)
 	}
-	if studioMatch == 0 {
+	if timeMatch == 0 {
 		return nil, ErrNotFound
 	}
 
@@ -309,7 +309,7 @@ func (s *Service) PatchItem(ctx context.Context, ownerID, prescriptionID, itemID
 	if patch.PlannedSets <= 0 || patch.PlannedReps == "" || patch.LoadKg < 0 {
 		return ErrInvalid
 	}
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func (s *Service) Publish(ctx context.Context, ownerID, prescriptionID string, a
 	if prescriptionID == "" {
 		return ErrInvalid
 	}
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return err
 	}

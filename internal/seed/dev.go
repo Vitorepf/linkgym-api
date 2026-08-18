@@ -12,7 +12,7 @@ const (
 	PhoneHuan  = "+5511900000003"
 	PhoneJose  = "+5511900000004"
 
-	StudioName  = "Fred"
+	TimeName    = "Fred"
 	AccentColor = "#ec3013"
 	InviteVitor = "FRED-VITOR"
 	InviteHuan  = "FRED-HUAN"
@@ -50,9 +50,9 @@ func Dev(ctx context.Context, db *sql.DB) error {
 		SELECT id, $1, $2 FROM people WHERE phone = $3
 		ON CONFLICT (owner_person_id) DO UPDATE
 		SET name = EXCLUDED.name, accent_color = EXCLUDED.accent_color, updated_at = now()`,
-		StudioName, AccentColor, PhoneFred,
+		TimeName, AccentColor, PhoneFred,
 	); err != nil {
-		return fmt.Errorf("studio: %w", err)
+		return fmt.Errorf("time: %w", err)
 	}
 
 	if _, err := db.ExecContext(ctx, `
@@ -118,7 +118,7 @@ func Dev(ctx context.Context, db *sql.DB) error {
 			ON CONFLICT (bond_id) DO NOTHING`,
 			p.phone, PhoneFred,
 		); err != nil {
-			return fmt.Errorf("streak %s: %w", p.name, err)
+			return fmt.Errorf("ofensiva %s: %w", p.name, err)
 		}
 	}
 

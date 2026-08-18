@@ -22,12 +22,12 @@ func New(db *sql.DB, now func() time.Time) *Service {
 
 type Session struct {
 	ID        string    `json:"id"`
-	ClientID  string    `json:"client_id"`
+	LocalID   string    `json:"local_id"`
 	StartedAt time.Time `json:"started_at"`
 }
 
 type SetInput struct {
-	ClientSetID           string
+	LocalID               string
 	PrescriptionItemID    string
 	ExerciseID            string
 	SwappedFromExerciseID *string
@@ -41,7 +41,7 @@ type SetInput struct {
 
 type Set struct {
 	ID                    string    `json:"id"`
-	ClientSetID           string    `json:"client_set_id"`
+	LocalID               string    `json:"local_id"`
 	PrescriptionItemID    *string   `json:"prescription_item_id"`
 	ExerciseID            string    `json:"exercise_id"`
 	SwappedFromExerciseID *string   `json:"swapped_from_exercise_id"`
@@ -53,7 +53,7 @@ type Set struct {
 	PerformedAt           time.Time `json:"performed_at"`
 }
 
-type Streak struct {
+type Ofensiva struct {
 	CurrentCount       int  `json:"current_count"`
 	ProtectorAvailable bool `json:"protector_available"`
 }
@@ -65,15 +65,15 @@ type Record struct {
 }
 
 type FinishResult struct {
-	Streak    Streak   `json:"streak"`
+	Ofensiva  Ofensiva `json:"ofensiva"`
 	XPGained  int      `json:"xp_gained"`
 	XPTotal   int      `json:"xp_total"`
 	Records   []Record `json:"records"`
 	BadgeKeys []string `json:"badge_keys"`
 }
 
-func (s *Service) Start(ctx context.Context, personID, clientID, prescriptionID string) (*Session, error) {
-	if personID == "" || clientID == "" || prescriptionID == "" {
+func (s *Service) Start(ctx context.Context, personID, localID, prescriptionID string) (*Session, error) {
+	if personID == "" || localID == "" || prescriptionID == "" {
 		return nil, ErrInvalid
 	}
 
@@ -100,15 +100,15 @@ func (s *Service) Start(ctx context.Context, personID, clientID, prescriptionID 
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (person_id, client_id) DO NOTHING
 		RETURNING id::text, client_id::text, started_at`,
-		personID, studioID, prescriptionID, clientID, s.now(),
-	).Scan(&out.ID, &out.ClientID, &out.StartedAt)
+		personID, studioID, prescriptionID, localID, s.now(),
+	).Scan(&out.ID, &out.LocalID, &out.StartedAt)
 	if err == sql.ErrNoRows {
 		err = s.db.QueryRowContext(ctx, `
 			SELECT id::text, client_id::text, started_at
 			FROM workout_sessions
 			WHERE person_id = $1 AND client_id = $2`,
-			personID, clientID,
-		).Scan(&out.ID, &out.ClientID, &out.StartedAt)
+			personID, localID,
+		).Scan(&out.ID, &out.LocalID, &out.StartedAt)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("start session: %w", err)
@@ -139,7 +139,7 @@ func (s *Service) AddSet(ctx context.Context, personID, sessionID string, in Set
 	if finishedAt.Valid {
 		return nil, ErrInvalid
 	}
-	if in.ClientSetID == "" || in.ExerciseID == "" || in.SetIndex < 1 {
+	if in.LocalID == "" || in.ExerciseID == "" || in.SetIndex < 1 {
 		return nil, ErrInvalid
 	}
 	performed := in.PerformedAt
@@ -169,7 +169,7 @@ func (s *Service) AddSet(ctx context.Context, personID, sessionID string, in Set
 		ON CONFLICT (session_id, client_set_id) DO NOTHING
 		RETURNING id::text, client_set_id::text, prescription_item_id::text, exercise_id::text,
 		          swapped_from_exercise_id::text, set_index, reps, load_kg, rest_seconds, effort, performed_at`,
-		sessionID, item, in.ExerciseID, swapped, in.ClientSetID, in.SetIndex,
+		sessionID, item, in.ExerciseID, swapped, in.LocalID, in.SetIndex,
 		in.Reps, in.LoadKg, in.RestSeconds, effort, performed,
 	)
 	got, err := scanSet(row)
@@ -179,7 +179,7 @@ func (s *Service) AddSet(ctx context.Context, personID, sessionID string, in Set
 			       swapped_from_exercise_id::text, set_index, reps, load_kg, rest_seconds, effort, performed_at
 			FROM workout_sets
 			WHERE session_id = $1 AND client_set_id = $2`,
-			sessionID, in.ClientSetID,
+			sessionID, in.LocalID,
 		))
 	}
 	if err != nil {
@@ -388,18 +388,18 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 			updated_at = now()`,
 		bondID, fulfilled,
 	); err != nil {
-		return nil, fmt.Errorf("finish streak: %w", err)
+		return nil, fmt.Errorf("finish ofensiva: %w", err)
 	}
 
-	var streak Streak
+	var ofensiva Ofensiva
 	if err := tx.QueryRowContext(ctx, `
 		SELECT current_count, protector_available FROM streaks WHERE bond_id = $1`,
 		bondID,
-	).Scan(&streak.CurrentCount, &streak.ProtectorAvailable); err != nil {
-		return nil, fmt.Errorf("finish streak read: %w", err)
+	).Scan(&ofensiva.CurrentCount, &ofensiva.ProtectorAvailable); err != nil {
+		return nil, fmt.Errorf("finish ofensiva read: %w", err)
 	}
 
-	if streak.CurrentCount >= 4 {
+	if ofensiva.CurrentCount >= 4 {
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO badges (studio_id, person_id, badge_key)
 			VALUES ($1, $2, 'ofensiva_4')
@@ -423,7 +423,7 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 	}
 
 	result := FinishResult{
-		Streak:    streak,
+		Ofensiva:  ofensiva,
 		XPGained:  10 + prXP,
 		XPTotal:   xpTotal,
 		Records:   records,
@@ -578,7 +578,7 @@ func scanSet(row scanner) (*Set, error) {
 		effort  sql.NullFloat64
 	)
 	err := row.Scan(
-		&out.ID, &out.ClientSetID, &item, &out.ExerciseID, &swapped,
+		&out.ID, &out.LocalID, &item, &out.ExerciseID, &swapped,
 		&out.SetIndex, &reps, &load, &rest, &effort, &out.PerformedAt,
 	)
 	if err != nil {

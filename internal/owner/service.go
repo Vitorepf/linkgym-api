@@ -117,7 +117,7 @@ type ReturnItem struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func (s *Service) ownerStudio(ctx context.Context, personID string) (string, error) {
+func (s *Service) ownerTime(ctx context.Context, personID string) (string, error) {
 	var role, studioID string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT b.role, b.studio_id::text
@@ -139,7 +139,7 @@ func (s *Service) ownerStudio(ctx context.Context, personID string) (string, err
 }
 
 func (s *Service) Returns(ctx context.Context, ownerID string) ([]ReturnItem, error) {
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func (s *Service) ApplyReturn(ctx context.Context, ownerID, alertID string, bump
 	if alertID == "" || !allowedBump(bump) {
 		return ErrInvalid
 	}
-	studioID, err := s.ownerStudio(ctx, ownerID)
+	studioID, err := s.ownerTime(ctx, ownerID)
 	if err != nil {
 		return err
 	}

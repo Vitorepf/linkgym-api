@@ -86,7 +86,8 @@ echo "seed (Fred + Vitor, Huan, Jose)..."
 go run ./cmd/seed
 
 echo "testes..."
-go test ./...
+# -p 1: os pacotes de teste compartilham este Postgres e se re-semeiam em paralelo.
+go test -p 1 ./...
 
 elapsed=$((SECONDS - start))
 echo ""

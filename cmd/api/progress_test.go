@@ -14,7 +14,7 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/workout"
 )
 
-func TestPRSurvivesStudioNameChange(t *testing.T) {
+func TestPRSurvivesTimeNameChange(t *testing.T) {
 	a := testAPI(t)
 	ctx := context.Background()
 	token := loginToken(t, a, seed.PhoneVitor)
@@ -39,7 +39,7 @@ func TestPRSurvivesStudioNameChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := a.workout.AddSet(ctx, personID, started.ID, workout.SetInput{
-		ClientSetID:        fmt.Sprintf("bbbbbbbb-cccc-4ddd-8eee-%012d", time.Now().UnixNano()%1e12),
+		LocalID:            fmt.Sprintf("bbbbbbbb-cccc-4ddd-8eee-%012d", time.Now().UnixNano()%1e12),
 		PrescriptionItemID: itemID,
 		ExerciseID:         exerciseID,
 		SetIndex:           1,
@@ -71,7 +71,7 @@ func TestPRSurvivesStudioNameChange(t *testing.T) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 	if bytes.Contains(rec.Body.Bytes(), []byte("OutroNome")) {
-		t.Fatalf("records leaked studio name: %s", rec.Body.String())
+		t.Fatalf("records leaked time name: %s", rec.Body.String())
 	}
 
 	var got struct {

@@ -123,7 +123,7 @@ func TestFinishAwardsXPAndDoesNotCopyLoads(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
-		ClientSetID:        newUUID(),
+		LocalID:            newUUID(),
 		PrescriptionItemID: lift.itemID,
 		ExerciseID:         lift.exerciseID,
 		SetIndex:           1,
@@ -185,7 +185,7 @@ func TestFinishAwardsXPAndDoesNotCopyLoads(t *testing.T) {
 	}
 }
 
-func TestDuplicateClientSetDoesNotDouble(t *testing.T) {
+func TestDuplicateLocalIDDoesNotDouble(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
 	lift := vitorSupinoToday(t, database)
@@ -195,7 +195,7 @@ func TestDuplicateClientSetDoesNotDouble(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := SetInput{
-		ClientSetID:        newUUID(),
+		LocalID:            newUUID(),
 		PrescriptionItemID: lift.itemID,
 		ExerciseID:         lift.exerciseID,
 		SetIndex:           1,
@@ -233,7 +233,7 @@ func TestOfflineSetWinsIfServerLacksRow(t *testing.T) {
 	}
 	id := newUUID()
 	first, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
-		ClientSetID:        id,
+		LocalID:            id,
 		PrescriptionItemID: lift.itemID,
 		ExerciseID:         lift.exerciseID,
 		SetIndex:           1,
@@ -246,7 +246,7 @@ func TestOfflineSetWinsIfServerLacksRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
-		ClientSetID:        id,
+		LocalID:            id,
 		PrescriptionItemID: lift.itemID,
 		ExerciseID:         lift.exerciseID,
 		SetIndex:           1,
@@ -284,7 +284,7 @@ func TestFinishTwiceDoesNotDoubleXP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
-		ClientSetID:        newUUID(),
+		LocalID:            newUUID(),
 		PrescriptionItemID: lift.itemID,
 		ExerciseID:         lift.exerciseID,
 		SetIndex:           1,
@@ -318,7 +318,7 @@ func TestFinishTwiceDoesNotDoubleXP(t *testing.T) {
 	}
 }
 
-func TestSecondFinishSameDayDoesNotDoubleStreak(t *testing.T) {
+func TestSecondFinishSameDayDoesNotDoubleOfensiva(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
 	lift := vitorSupinoToday(t, database)
@@ -342,7 +342,7 @@ func TestSecondFinishSameDayDoesNotDoubleStreak(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
-			ClientSetID:        newUUID(),
+			LocalID:            newUUID(),
 			PrescriptionItemID: lift.itemID,
 			ExerciseID:         lift.exerciseID,
 			SetIndex:           1,
@@ -361,16 +361,16 @@ func TestSecondFinishSameDayDoesNotDoubleStreak(t *testing.T) {
 	}
 
 	first := finish(40)
-	if first.Streak.CurrentCount != 1 {
-		t.Fatalf("first streak %d want 1", first.Streak.CurrentCount)
+	if first.Ofensiva.CurrentCount != 1 {
+		t.Fatalf("first ofensiva %d want 1", first.Ofensiva.CurrentCount)
 	}
 	if first.XPGained != 35 {
 		t.Fatalf("first xp_gained %d want 35", first.XPGained)
 	}
 
 	second := finish(45)
-	if second.Streak.CurrentCount != 1 {
-		t.Fatalf("second streak %d want 1 (same for_date)", second.Streak.CurrentCount)
+	if second.Ofensiva.CurrentCount != 1 {
+		t.Fatalf("second ofensiva %d want 1 (same for_date)", second.Ofensiva.CurrentCount)
 	}
 	if second.XPGained != 35 {
 		t.Fatalf("second xp_gained %d want 35 (10 session + 25 pr)", second.XPGained)
@@ -409,7 +409,7 @@ func TestFinishWithNoSetsRejected(t *testing.T) {
 	}
 }
 
-func TestSwapWritesAlertAndKeepsStreak(t *testing.T) {
+func TestSwapWritesAlertAndKeepsOfensiva(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
 	lift := vitorSupinoToday(t, database)
@@ -452,16 +452,16 @@ func TestSwapWritesAlertAndKeepsStreak(t *testing.T) {
 		t.Fatalf("payload %s", payload)
 	}
 
-	var streak int
+	var ofensiva int
 	if err := database.QueryRow(`
 		SELECT current_count FROM streaks
 		WHERE bond_id = (SELECT active_bond_id FROM people WHERE id = $1)`,
 		lift.personID,
-	).Scan(&streak); err != nil {
+	).Scan(&ofensiva); err != nil {
 		t.Fatal(err)
 	}
-	if streak != 7 {
-		t.Fatalf("streak %d want 7", streak)
+	if ofensiva != 7 {
+		t.Fatalf("ofensiva %d want 7", ofensiva)
 	}
 }
 
@@ -516,7 +516,7 @@ func TestDebutBadgeOnFirstFinish(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := svc.AddSet(ctx, personID, started.ID, SetInput{
-			ClientSetID:        newUUID(),
+			LocalID:            newUUID(),
 			PrescriptionItemID: itemID,
 			ExerciseID:         exerciseID,
 			SetIndex:           1,
@@ -564,7 +564,7 @@ func TestDebutBadgeOnFirstFinish(t *testing.T) {
 	}
 }
 
-func TestFinishAtStreakFourAwardsOfensiva4(t *testing.T) {
+func TestFinishAtOfensivaFourAwardsOfensiva4(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
 	lift := vitorSupinoToday(t, database)
@@ -595,7 +595,7 @@ func TestFinishAtStreakFourAwardsOfensiva4(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
-		ClientSetID:        newUUID(),
+		LocalID:            newUUID(),
 		PrescriptionItemID: lift.itemID,
 		ExerciseID:         lift.exerciseID,
 		SetIndex:           1,
@@ -610,8 +610,8 @@ func TestFinishAtStreakFourAwardsOfensiva4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Streak.CurrentCount < 4 {
-		t.Fatalf("streak %d want >= 4", got.Streak.CurrentCount)
+	if got.Ofensiva.CurrentCount < 4 {
+		t.Fatalf("ofensiva %d want >= 4", got.Ofensiva.CurrentCount)
 	}
 	if !hasBadge(got.BadgeKeys, "ofensiva_4") {
 		t.Fatalf("badge_keys %+v, want ofensiva_4", got.BadgeKeys)
@@ -637,7 +637,7 @@ func TestAddSetRejectedWhenFinished(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
-		ClientSetID:        newUUID(),
+		LocalID:            newUUID(),
 		PrescriptionItemID: lift.itemID,
 		ExerciseID:         lift.exerciseID,
 		SetIndex:           1,
@@ -652,7 +652,7 @@ func TestAddSetRejectedWhenFinished(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = svc.AddSet(ctx, lift.personID, started.ID, SetInput{
-		ClientSetID:        newUUID(),
+		LocalID:            newUUID(),
 		PrescriptionItemID: lift.itemID,
 		ExerciseID:         lift.exerciseID,
 		SetIndex:           2,

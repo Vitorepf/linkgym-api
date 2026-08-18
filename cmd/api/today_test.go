@@ -299,37 +299,37 @@ func TestTodayUnauthorizedWithoutToken(t *testing.T) {
 	}
 }
 
-func TestReadinessPutUnauthorized(t *testing.T) {
+func TestProntidaoPutUnauthorized(t *testing.T) {
 	a := testAPI(t)
-	req := httptest.NewRequest(http.MethodPut, "/v1/today/readiness", bytes.NewBufferString(`{"energy":4,"soreness":2,"sleep":4}`))
+	req := httptest.NewRequest(http.MethodPut, "/v1/today/prontidao", bytes.NewBufferString(`{"energy":4,"soreness":2,"sleep":4}`))
 	rec := httptest.NewRecorder()
-	a.withPerson(a.todayReadinessPut)(rec, req)
+	a.withPerson(a.todayProntidaoPut)(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestReadinessPutInvalidBody(t *testing.T) {
+func TestProntidaoPutInvalidBody(t *testing.T) {
 	a := testAPI(t)
 	token := loginToken(t, a, "+5511900000002")
 	body := bytes.NewBufferString(`{"energy":0,"soreness":3,"sleep":3}`)
-	req := httptest.NewRequest(http.MethodPut, "/v1/today/readiness", body)
+	req := httptest.NewRequest(http.MethodPut, "/v1/today/prontidao", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
-	a.withPerson(a.todayReadinessPut)(rec, req)
+	a.withPerson(a.todayProntidaoPut)(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestReadinessPutReturnsScore(t *testing.T) {
+func TestProntidaoPutReturnsScore(t *testing.T) {
 	a := testAPI(t)
 	token := loginToken(t, a, "+5511900000002")
 	body := bytes.NewBufferString(`{"energy":4,"soreness":2,"sleep":4}`)
-	req := httptest.NewRequest(http.MethodPut, "/v1/today/readiness", body)
+	req := httptest.NewRequest(http.MethodPut, "/v1/today/prontidao", body)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
-	a.withPerson(a.todayReadinessPut)(rec, req)
+	a.withPerson(a.todayProntidaoPut)(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
