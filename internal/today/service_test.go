@@ -357,3 +357,79 @@ func TestD11OpensComebackWithoutWipingPR(t *testing.T) {
 		t.Fatal("personal_records wiped")
 	}
 }
+
+func TestCompleteComebackTwiceSucceeds(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	joseID := personIDByPhone(t, database, seed.PhoneJose)
+	bondID := bondIDOf(t, database, joseID)
+	t.Cleanup(func() {
+		_, _ = database.Exec(`DELETE FROM comebacks WHERE bond_id = $1`, bondID)
+		_, _ = database.Exec(`DELETE FROM badges WHERE person_id = $1 AND badge_key = 'retomada'`, joseID)
+	})
+
+	var comebackID string
+	if err := database.QueryRow(`
+		INSERT INTO comebacks (bond_id, missed_on)
+		VALUES ($1, current_date - 3)
+		ON CONFLICT (bond_id, missed_on) DO UPDATE SET completed_at = NULL
+		RETURNING id::text`,
+		bondID,
+	).Scan(&comebackID); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	if err := svc.CompleteComeback(ctx, joseID, comebackID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CompleteComeback(ctx, joseID, comebackID); err != nil {
+		t.Fatalf("second complete: %v", err)
+	}
+
+	var completed sql.NullTime
+	if err := database.QueryRow(`SELECT completed_at FROM comebacks WHERE id = $1`, comebackID).Scan(&completed); err != nil {
+		t.Fatal(err)
+	}
+	if !completed.Valid {
+		t.Fatal("completed_at empty")
+	}
+}
+
+func TestCompleteComebackAwardsRetomadaBadge(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	joseID := personIDByPhone(t, database, seed.PhoneJose)
+	bondID := bondIDOf(t, database, joseID)
+	if _, err := database.Exec(`DELETE FROM badges WHERE person_id = $1 AND badge_key = 'retomada'`, joseID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = database.Exec(`DELETE FROM comebacks WHERE bond_id = $1`, bondID)
+		_, _ = database.Exec(`DELETE FROM badges WHERE person_id = $1 AND badge_key = 'retomada'`, joseID)
+	})
+
+	var comebackID string
+	if err := database.QueryRow(`
+		INSERT INTO comebacks (bond_id, missed_on)
+		VALUES ($1, current_date - 4)
+		ON CONFLICT (bond_id, missed_on) DO UPDATE SET completed_at = NULL
+		RETURNING id::text`,
+		bondID,
+	).Scan(&comebackID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.CompleteComeback(context.Background(), joseID, comebackID); err != nil {
+		t.Fatal(err)
+	}
+
+	var key string
+	if err := database.QueryRow(`
+		SELECT badge_key FROM badges
+		WHERE person_id = $1 AND badge_key = 'retomada'`,
+		joseID,
+	).Scan(&key); err != nil {
+		t.Fatalf("retomada row: %v", err)
+	}
+}

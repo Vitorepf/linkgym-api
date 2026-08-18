@@ -465,10 +465,10 @@ func publishFromModelo(ctx context.Context, tx *sql.Tx, studioID, personID, mode
 			load_kg, rest_seconds, notes, load_source
 		)
 		SELECT $1, mi.exercise_id, mi.position, mi.planned_sets, mi.planned_reps,
-		       COALESCE(hist.load_kg, last_set.load_kg, mi.starter_load_kg, 0),
+		       COALESCE(last_set.load_kg, hist.load_kg, mi.starter_load_kg, 0),
 		       mi.rest_seconds, mi.notes,
 		       CASE
-		           WHEN hist.load_kg IS NOT NULL OR last_set.load_kg IS NOT NULL THEN 'history'
+		           WHEN last_set.load_kg IS NOT NULL OR hist.load_kg IS NOT NULL THEN 'history'
 		           ELSE 'starter'
 		       END
 		FROM model_items mi

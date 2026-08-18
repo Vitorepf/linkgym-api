@@ -67,6 +67,167 @@ func TestWeekApprovePublishesTomorrowWithOwnLoads(t *testing.T) {
 	}
 }
 
+func TestWeekApproveSkipsExistingTomorrowPublished(t *testing.T) {
+	database := openSeeded(t)
+	var day time.Time
+	if err := database.QueryRow(`SELECT current_date`).Scan(&day); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(day.Year(), day.Month(), day.Day(), 12, 0, 0, 0, time.UTC)
+	svc := New(database, func() time.Time { return now })
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	huanID := personIDByPhone(t, database, seed.PhoneHuan)
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+
+	if _, err := database.Exec(`
+		DELETE FROM prescriptions
+		WHERE person_id IN ($1, $2) AND for_date = $3::date`,
+		vitorID, huanID, tomorrow,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = database.Exec(`
+			DELETE FROM prescriptions
+			WHERE person_id IN ($1, $2) AND for_date = $3::date`,
+			vitorID, huanID, tomorrow,
+		)
+	})
+
+	clonePublishedOnDate(t, database, vitorID, tomorrow)
+	if _, err := database.Exec(`
+		UPDATE prescription_items
+		SET load_kg = 42.5, load_source = 'manual'
+		WHERE prescription_id = (
+			SELECT id FROM prescriptions
+			WHERE person_id = $1 AND for_date = $2::date AND status = 'published'
+		) AND position = 1`,
+		vitorID, tomorrow,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.Approve(context.Background(), fredID, []string{vitorID, huanID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("count %d want 1 (skip already published)", n)
+	}
+
+	var vitorLoad float64
+	if err := database.QueryRow(`
+		SELECT pi.load_kg
+		FROM prescriptions pr
+		JOIN prescription_items pi ON pi.prescription_id = pr.id AND pi.position = 1
+		WHERE pr.person_id = $1 AND pr.for_date = $2::date AND pr.status = 'published'`,
+		vitorID, tomorrow,
+	).Scan(&vitorLoad); err != nil {
+		t.Fatal(err)
+	}
+	if vitorLoad != 42.5 {
+		t.Fatalf("vitor %v want 42.5 (manual must stay)", vitorLoad)
+	}
+
+	var huanLoad float64
+	if err := database.QueryRow(`
+		SELECT pi.load_kg
+		FROM prescriptions pr
+		JOIN prescription_items pi ON pi.prescription_id = pr.id AND pi.position = 1
+		WHERE pr.person_id = $1 AND pr.for_date = $2::date AND pr.status = 'published'`,
+		huanID, tomorrow,
+	).Scan(&huanLoad); err != nil {
+		t.Fatal(err)
+	}
+	if huanLoad != 22.5 {
+		t.Fatalf("huan %v want 22.5", huanLoad)
+	}
+}
+
+func TestWeekApproveUsesLastSetIfPresent(t *testing.T) {
+	database := openSeeded(t)
+	var day time.Time
+	if err := database.QueryRow(`SELECT current_date`).Scan(&day); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(day.Year(), day.Month(), day.Day(), 12, 0, 0, 0, time.UTC)
+	svc := New(database, func() time.Time { return now })
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	tomorrow := now.AddDate(0, 0, 1).Format("2006-01-02")
+
+	if _, err := database.Exec(`
+		DELETE FROM prescriptions
+		WHERE person_id = $1 AND for_date = $2::date`,
+		vitorID, tomorrow,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = database.Exec(`
+			DELETE FROM prescriptions
+			WHERE person_id = $1 AND for_date = $2::date`,
+			vitorID, tomorrow,
+		)
+		_, _ = database.Exec(`DELETE FROM workout_sessions WHERE person_id = $1`, vitorID)
+	})
+
+	var sessionID, exerciseID string
+	if err := database.QueryRow(`
+		INSERT INTO workout_sessions (
+			person_id, studio_id, prescription_id, client_id, started_at, finished_at, effort
+		)
+		SELECT person_id, studio_id, id, gen_random_uuid(), now() - interval '1 hour', now(), 2
+		FROM prescriptions
+		WHERE person_id = $1 AND for_date = current_date AND status = 'published'
+		RETURNING id::text`,
+		vitorID,
+	).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`
+		SELECT pi.exercise_id::text
+		FROM prescriptions pr
+		JOIN prescription_items pi ON pi.prescription_id = pr.id AND pi.position = 1
+		WHERE pr.person_id = $1 AND pr.for_date = current_date AND pr.status = 'published'`,
+		vitorID,
+	).Scan(&exerciseID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO workout_sets (
+			session_id, exercise_id, client_set_id, set_index, reps, load_kg, rest_seconds, performed_at
+		)
+		VALUES ($1, $2, gen_random_uuid(), 1, 8, 42.5, 90, now())`,
+		sessionID, exerciseID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.Approve(context.Background(), fredID, []string{vitorID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("count %d", n)
+	}
+
+	var load float64
+	if err := database.QueryRow(`
+		SELECT pi.load_kg
+		FROM prescriptions pr
+		JOIN prescription_items pi ON pi.prescription_id = pr.id AND pi.position = 1
+		WHERE pr.person_id = $1 AND pr.for_date = $2::date AND pr.status = 'published'`,
+		vitorID, tomorrow,
+	).Scan(&load); err != nil {
+		t.Fatal(err)
+	}
+	if load != 42.5 {
+		t.Fatalf("load %v want 42.5 from last set", load)
+	}
+}
+
 func TestWeekListsStudentsSelectedWithDefaultManter(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
@@ -159,6 +320,36 @@ func TestWeekSuggestsShortWhenMissingTwoDays(t *testing.T) {
 	got := itemByName(t, items, "Huan")
 	if got.Suggested != "versão curta" {
 		t.Fatalf("suggested %q", got.Suggested)
+	}
+}
+
+func TestStudentCardReturnsCommitmentText(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	t.Cleanup(func() {
+		_, _ = database.Exec(`
+			UPDATE bonds SET commitment_text = NULL, commitment_at = NULL
+			WHERE person_id = $1`,
+			vitorID,
+		)
+	})
+
+	if _, err := database.Exec(`
+		UPDATE bonds SET commitment_text = '3 dias', commitment_at = now()
+		WHERE person_id = $1 AND role = 'student'`,
+		vitorID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Student(context.Background(), fredID, vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CommitmentText == nil || *got.CommitmentText != "3 dias" {
+		t.Fatalf("commitment_text %+v", got.CommitmentText)
 	}
 }
 

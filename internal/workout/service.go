@@ -117,8 +117,27 @@ func (s *Service) Start(ctx context.Context, personID, clientID, prescriptionID 
 }
 
 func (s *Service) AddSet(ctx context.Context, personID, sessionID string, in SetInput) (*Set, error) {
-	if err := s.ownSession(ctx, personID, sessionID); err != nil {
-		return nil, err
+	var (
+		owner      string
+		finishedAt sql.NullTime
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT person_id::text, finished_at
+		FROM workout_sessions
+		WHERE id = $1`,
+		sessionID,
+	).Scan(&owner, &finishedAt)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("add set session: %w", err)
+	}
+	if owner != personID {
+		return nil, ErrForbidden
+	}
+	if finishedAt.Valid {
+		return nil, ErrInvalid
 	}
 	if in.ClientSetID == "" || in.ExerciseID == "" || in.SetIndex < 1 {
 		return nil, ErrInvalid
@@ -380,6 +399,21 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 		return nil, fmt.Errorf("finish streak read: %w", err)
 	}
 
+	if streak.CurrentCount >= 4 {
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO badges (studio_id, person_id, badge_key)
+			VALUES ($1, $2, 'ofensiva_4')
+			ON CONFLICT (studio_id, person_id, badge_key) DO NOTHING`,
+			studioID, personID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("finish ofensiva_4: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			badgeKeys = append(badgeKeys, "ofensiva_4")
+		}
+	}
+
 	var xpTotal int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(amount), 0) FROM xp_ledger WHERE bond_id = $1`,
@@ -527,24 +561,6 @@ func loadFinishSnapshot(ctx context.Context, tx *sql.Tx, sessionID string) (*Fin
 		got.BadgeKeys = []string{}
 	}
 	return &got, nil
-}
-
-func (s *Service) ownSession(ctx context.Context, personID, sessionID string) error {
-	var owner string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT person_id::text FROM workout_sessions WHERE id = $1`,
-		sessionID,
-	).Scan(&owner)
-	if err == sql.ErrNoRows {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if owner != personID {
-		return ErrForbidden
-	}
-	return nil
 }
 
 type scanner interface {

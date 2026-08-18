@@ -195,6 +195,49 @@ func TestOwnerStudentForbiddenAsStudent(t *testing.T) {
 	}
 }
 
+func TestOwnerStudentReturnsCommitmentTextAfterPut(t *testing.T) {
+	a := testAPI(t)
+	vitorTok := loginToken(t, a, seed.PhoneVitor)
+	fredTok := loginToken(t, a, seed.PhoneFred)
+	var vitorID string
+	if err := a.db.QueryRow(`SELECT id::text FROM people WHERE phone = $1`, seed.PhoneVitor).Scan(&vitorID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = a.db.Exec(`
+			UPDATE bonds SET commitment_text = NULL, commitment_at = NULL
+			WHERE person_id = $1`,
+			vitorID,
+		)
+	})
+
+	put := httptest.NewRequest(http.MethodPut, "/v1/commitment", bytes.NewBufferString(`{"days_per_week":3}`))
+	put.Header.Set("Authorization", "Bearer "+vitorTok)
+	putRec := httptest.NewRecorder()
+	a.withPerson(a.commitmentPut)(putRec, put)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("put status %d body %s", putRec.Code, putRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/owner/students/"+vitorID, nil)
+	req.Header.Set("Authorization", "Bearer "+fredTok)
+	req.SetPathValue("id", vitorID)
+	rec := httptest.NewRecorder()
+	a.withPerson(a.ownerStudent)(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		CommitmentText *string `json:"commitment_text"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.CommitmentText == nil || *got.CommitmentText != "3 dias" {
+		t.Fatalf("body %s", rec.Body.String())
+	}
+}
+
 func TestOwnerStudentNotFound(t *testing.T) {
 	a := testAPI(t)
 	token := loginToken(t, a, seed.PhoneFred)

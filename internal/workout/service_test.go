@@ -564,6 +564,115 @@ func TestDebutBadgeOnFirstFinish(t *testing.T) {
 	}
 }
 
+func TestFinishAtStreakFourAwardsOfensiva4(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	lift := vitorSupinoToday(t, database)
+	ctx := context.Background()
+	if _, err := database.Exec(`DELETE FROM badges WHERE person_id = $1 AND badge_key = 'ofensiva_4'`, lift.personID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = database.Exec(`DELETE FROM badges WHERE person_id = $1 AND badge_key = 'ofensiva_4'`, lift.personID)
+		_, _ = database.Exec(`DELETE FROM workout_sessions WHERE person_id = $1`, lift.personID)
+	})
+
+	if _, err := database.Exec(`
+		INSERT INTO streaks (bond_id, current_count, last_fulfilled_on, protector_available)
+		SELECT active_bond_id, 3, current_date - 1, true
+		FROM people WHERE id = $1
+		ON CONFLICT (bond_id) DO UPDATE SET
+			current_count = 3,
+			last_fulfilled_on = current_date - 1,
+			updated_at = now()`,
+		lift.personID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	started, err := svc.Start(ctx, lift.personID, newUUID(), lift.prescriptionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
+		ClientSetID:        newUUID(),
+		PrescriptionItemID: lift.itemID,
+		ExerciseID:         lift.exerciseID,
+		SetIndex:           1,
+		Reps:               10,
+		LoadKg:             lift.loadKg,
+		RestSeconds:        90,
+		PerformedAt:        time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Finish(ctx, lift.personID, started.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Streak.CurrentCount < 4 {
+		t.Fatalf("streak %d want >= 4", got.Streak.CurrentCount)
+	}
+	if !hasBadge(got.BadgeKeys, "ofensiva_4") {
+		t.Fatalf("badge_keys %+v, want ofensiva_4", got.BadgeKeys)
+	}
+	var key string
+	if err := database.QueryRow(`
+		SELECT badge_key FROM badges
+		WHERE person_id = $1 AND badge_key = 'ofensiva_4'`,
+		lift.personID,
+	).Scan(&key); err != nil {
+		t.Fatalf("ofensiva_4 row: %v", err)
+	}
+}
+
+func TestAddSetRejectedWhenFinished(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	lift := vitorSupinoToday(t, database)
+	ctx := context.Background()
+
+	started, err := svc.Start(ctx, lift.personID, newUUID(), lift.prescriptionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
+		ClientSetID:        newUUID(),
+		PrescriptionItemID: lift.itemID,
+		ExerciseID:         lift.exerciseID,
+		SetIndex:           1,
+		Reps:               10,
+		LoadKg:             lift.loadKg,
+		RestSeconds:        90,
+		PerformedAt:        time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Finish(ctx, lift.personID, started.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.AddSet(ctx, lift.personID, started.ID, SetInput{
+		ClientSetID:        newUUID(),
+		PrescriptionItemID: lift.itemID,
+		ExerciseID:         lift.exerciseID,
+		SetIndex:           2,
+		Reps:               8,
+		LoadKg:             lift.loadKg,
+		RestSeconds:        90,
+		PerformedAt:        time.Now().UTC(),
+	})
+	if err != ErrInvalid {
+		t.Fatalf("got %v want %v", err, ErrInvalid)
+	}
+	var n int
+	if err := database.QueryRow(`SELECT count(*) FROM workout_sets WHERE session_id = $1`, started.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("sets %d want 1", n)
+	}
+}
+
 func hasBadge(keys []string, want string) bool {
 	for _, k := range keys {
 		if k == want {

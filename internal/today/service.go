@@ -454,23 +454,41 @@ func (s *Service) CompleteComeback(ctx context.Context, personID, comebackID str
 	if comebackID == "" {
 		return ErrNotFound
 	}
-	res, err := s.db.ExecContext(ctx, `
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var studioID string
+	err = tx.QueryRowContext(ctx, `
 		UPDATE comebacks c
-		SET completed_at = $3
-		FROM people p
+		SET completed_at = COALESCE(c.completed_at, $3)
+		FROM people p, bonds b
 		WHERE c.id = $1 AND p.id = $2
 		  AND c.bond_id = p.active_bond_id
-		  AND c.completed_at IS NULL`,
+		  AND b.id = c.bond_id
+		RETURNING b.studio_id::text`,
 		comebackID, personID, s.now(),
-	)
+	).Scan(&studioID)
+	if err == sql.ErrNoRows {
+		return ErrNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("today comeback complete: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return ErrNotFound
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO badges (studio_id, person_id, badge_key)
+		VALUES ($1, $2, 'retomada')
+		ON CONFLICT (studio_id, person_id, badge_key) DO NOTHING`,
+		studioID, personID,
+	); err != nil {
+		return fmt.Errorf("today retomada badge: %w", err)
 	}
-	return nil
+
+	return tx.Commit()
 }
 
 func (s *Service) PutReadiness(ctx context.Context, personID string, energy, soreness, sleep int) (Readiness, error) {

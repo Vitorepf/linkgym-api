@@ -28,7 +28,8 @@ type StudentCard struct {
 	Streak     struct {
 		CurrentCount int `json:"current_count"`
 	} `json:"streak"`
-	Suggested string `json:"suggested"`
+	Suggested      string  `json:"suggested"`
+	CommitmentText *string `json:"commitment_text"`
 }
 
 func (s *Service) Week(ctx context.Context, ownerID, from string) ([]WeekItem, error) {
@@ -137,13 +138,16 @@ func (s *Service) Approve(ctx context.Context, ownerID string, personIDs []strin
 		if personID == "" {
 			continue
 		}
-		if err := publishTomorrowFromModelo(ctx, tx, studioID, personID, tomorrow, now); err != nil {
+		published, err := publishTomorrowFromModelo(ctx, tx, studioID, personID, tomorrow, now)
+		if err != nil {
 			if err == ErrNotFound {
 				continue
 			}
 			return 0, err
 		}
-		count++
+		if published {
+			count++
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -151,17 +155,29 @@ func (s *Service) Approve(ctx context.Context, ownerID string, personIDs []strin
 	return count, nil
 }
 
-func publishTomorrowFromModelo(ctx context.Context, tx *sql.Tx, studioID, personID, tomorrow string, now time.Time) error {
+func publishTomorrowFromModelo(ctx context.Context, tx *sql.Tx, studioID, personID, tomorrow string, now time.Time) (bool, error) {
 	var n int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT count(*) FROM bonds
 		WHERE person_id = $1 AND studio_id = $2 AND role = 'student' AND status = 'active'`,
 		personID, studioID,
 	).Scan(&n); err != nil {
-		return fmt.Errorf("owner week bond: %w", err)
+		return false, fmt.Errorf("owner week bond: %w", err)
 	}
 	if n == 0 {
-		return ErrNotFound
+		return false, ErrNotFound
+	}
+
+	var existing int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT count(*) FROM prescriptions
+		WHERE person_id = $1 AND studio_id = $2 AND for_date = $3::date AND status = 'published'`,
+		personID, studioID, tomorrow,
+	).Scan(&existing); err != nil {
+		return false, fmt.Errorf("owner week existing: %w", err)
+	}
+	if existing > 0 {
+		return false, nil
 	}
 
 	var modelID string
@@ -176,31 +192,19 @@ func publishTomorrowFromModelo(ctx context.Context, tx *sql.Tx, studioID, person
 	).Scan(&modelID)
 	if err != nil || modelID == "" {
 		if err == sql.ErrNoRows || modelID == "" {
-			return ErrNotFound
+			return false, ErrNotFound
 		}
-		return fmt.Errorf("owner week model: %w", err)
+		return false, fmt.Errorf("owner week model: %w", err)
 	}
 
 	var prID string
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO prescriptions (studio_id, person_id, model_id, for_date, status, published_at)
 		VALUES ($1, $2, $3::uuid, $4::date, 'published', $5)
-		ON CONFLICT (person_id, studio_id, for_date) WHERE status = 'published'
-		DO UPDATE SET
-			model_id = EXCLUDED.model_id,
-			published_at = EXCLUDED.published_at,
-			updated_at = now()
 		RETURNING id::text`,
 		studioID, personID, modelID, tomorrow, now,
 	).Scan(&prID); err != nil {
-		return fmt.Errorf("owner week prescription: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM prescription_items WHERE prescription_id = $1`,
-		prID,
-	); err != nil {
-		return fmt.Errorf("owner week clear items: %w", err)
+		return false, fmt.Errorf("owner week prescription: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -209,9 +213,12 @@ func publishTomorrowFromModelo(ctx context.Context, tx *sql.Tx, studioID, person
 			load_kg, rest_seconds, notes, load_source
 		)
 		SELECT $1, mi.exercise_id, mi.position, mi.planned_sets, mi.planned_reps,
-		       COALESCE(hist.load_kg, mi.starter_load_kg),
+		       COALESCE(last_set.load_kg, hist.load_kg, mi.starter_load_kg, 0),
 		       mi.rest_seconds, mi.notes,
-		       CASE WHEN hist.load_kg IS NOT NULL THEN 'history' ELSE 'starter' END
+		       CASE
+		           WHEN last_set.load_kg IS NOT NULL OR hist.load_kg IS NOT NULL THEN 'history'
+		           ELSE 'starter'
+		       END
 		FROM model_items mi
 		LEFT JOIN LATERAL (
 			SELECT pi.load_kg
@@ -223,12 +230,21 @@ func publishTomorrowFromModelo(ctx context.Context, tx *sql.Tx, studioID, person
 			ORDER BY pr.for_date DESC
 			LIMIT 1
 		) hist ON true
+		LEFT JOIN LATERAL (
+			SELECT ws.load_kg
+			FROM workout_sets ws
+			JOIN workout_sessions sess ON sess.id = ws.session_id
+			WHERE sess.person_id = $2 AND sess.studio_id = $3
+			  AND ws.exercise_id = mi.exercise_id AND ws.load_kg IS NOT NULL
+			ORDER BY ws.performed_at DESC
+			LIMIT 1
+		) last_set ON true
 		WHERE mi.model_id = $5::uuid`,
 		prID, personID, studioID, tomorrow, modelID,
 	); err != nil {
-		return fmt.Errorf("owner week items: %w", err)
+		return false, fmt.Errorf("owner week items: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func (s *Service) Student(ctx context.Context, ownerID, personID string) (*StudentCard, error) {
@@ -241,14 +257,15 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 	}
 
 	var (
-		out       StudentCard
-		bondID    string
-		reason    sql.NullString
-		published int
-		openCome  sql.NullString
+		out        StudentCard
+		bondID     string
+		reason     sql.NullString
+		published  int
+		openCome   sql.NullString
+		commitment sql.NullString
 	)
 	err = s.db.QueryRowContext(ctx, `
-		SELECT p.id::text, p.name, b.id::text,
+		SELECT p.id::text, p.name, b.id::text, b.commitment_text,
 		       (SELECT a.reason FROM attention_items a
 		        WHERE a.person_id = p.id AND a.studio_id = b.studio_id AND a.for_date = $3::date
 		        LIMIT 1),
@@ -260,7 +277,7 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 		JOIN bonds b ON b.person_id = p.id AND b.studio_id = $2
 		WHERE p.id = $1 AND b.role = 'student' AND b.status = 'active'`,
 		personID, studioID, s.now().Format("2006-01-02"),
-	).Scan(&out.PersonID, &out.Name, &bondID, &reason, &published, &openCome)
+	).Scan(&out.PersonID, &out.Name, &bondID, &commitment, &reason, &published, &openCome)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -316,6 +333,11 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+
+	if commitment.Valid && commitment.String != "" {
+		text := commitment.String
+		out.CommitmentText = &text
 	}
 
 	out.Suggested = studentSuggested(reason.String, openCome.Valid, published > 0)
