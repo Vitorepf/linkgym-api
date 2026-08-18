@@ -17,6 +17,7 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/config"
 	"github.com/Vitorepf/linkgym-api/internal/db"
 	"github.com/Vitorepf/linkgym-api/internal/migrate"
+	"github.com/Vitorepf/linkgym-api/internal/onboard"
 	"github.com/Vitorepf/linkgym-api/internal/owner"
 	"github.com/Vitorepf/linkgym-api/internal/progress"
 	"github.com/Vitorepf/linkgym-api/internal/seed"
@@ -70,13 +71,14 @@ func testAPI(t *testing.T) *api {
 		owner:    owner.New(database, time.Now),
 		progress: progress.New(database, time.Now),
 		workout:  workout.New(database, time.Now),
+		onboard:  onboard.New(database, time.Now),
 	}
 }
 
 func loginToken(t *testing.T, a *api, phone string) string {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := a.auth.RequestCode(ctx, phone, ""); err != nil {
+	if _, _, err := a.auth.RequestCode(ctx, phone, ""); err != nil {
 		t.Fatal(err)
 	}
 	session, err := a.auth.Verify(ctx, phone, auth.DevCode, "")

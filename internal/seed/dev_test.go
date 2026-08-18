@@ -94,12 +94,27 @@ func TestDevSeedIsIdempotent(t *testing.T) {
 		FROM prescription_items pi
 		JOIN prescriptions pr ON pr.id = pi.prescription_id
 		JOIN people p ON p.id = pr.person_id
-		WHERE p.phone IN ($1, $2, $3) AND pi.position = 1`,
+		WHERE p.phone IN ($1, $2, $3) AND pi.position = 1 AND pr.status = 'published'`,
 		PhoneVitor, PhoneHuan, PhoneJose,
 	).Scan(&loads); err != nil {
 		t.Fatal(err)
 	}
 	if loads != 3 {
 		t.Fatalf("lote tinha %d cargas distintas no supino, want 3", loads)
+	}
+
+	var onboarded int
+	if err := database.QueryRow(`
+		SELECT count(*) FROM bonds b
+		JOIN people p ON p.id = b.person_id
+		WHERE b.role = 'student'
+		  AND p.phone IN ($1, $2, $3)
+		  AND b.onboarding ? 'experience'`,
+		PhoneVitor, PhoneHuan, PhoneJose,
+	).Scan(&onboarded); err != nil {
+		t.Fatal(err)
+	}
+	if onboarded != 3 {
+		t.Fatalf("seed students with onboarding experience = %d, want 3", onboarded)
 	}
 }

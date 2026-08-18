@@ -9,10 +9,10 @@ import (
 )
 
 type Service struct {
-	db      *sql.DB
-	pepper  string
-	dev     bool
-	now     func() time.Time
+	db     *sql.DB
+	pepper string
+	dev    bool
+	now    func() time.Time
 }
 
 func New(db *sql.DB, pepper string, dev bool) *Service {
@@ -23,9 +23,12 @@ func New(db *sql.DB, pepper string, dev bool) *Service {
 }
 
 type Session struct {
-	Token  string
-	Person Person
-	Studio Studio
+	Token              string
+	Person             Person
+	Studio             Studio
+	OnboardingComplete bool
+	CommitmentComplete bool
+	Debut              bool
 }
 
 type Person struct {
@@ -41,10 +44,10 @@ type Studio struct {
 	Accent string `json:"accent_color"`
 }
 
-func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (devCode string, err error) {
+func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (devCode string, studio *Studio, err error) {
 	phone, err := NormalizePhone(rawPhone)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	invite = strings.ToUpper(strings.TrimSpace(invite))
 
@@ -52,7 +55,7 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 	err = s.db.QueryRowContext(ctx, `SELECT id FROM people WHERE phone = $1`, phone).Scan(&personID)
 	if errors.Is(err, sql.ErrNoRows) {
 		if invite == "" {
-			return "", ErrInviteRequired
+			return "", nil, ErrInviteRequired
 		}
 		var inviteID string
 		err = s.db.QueryRowContext(ctx, `
@@ -61,20 +64,37 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 			invite, phone, s.now(),
 		).Scan(&inviteID)
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrInviteInvalid
+			return "", nil, ErrInviteInvalid
 		}
 		if err != nil {
-			return "", fmtErr("invite", err)
+			return "", nil, fmtErr("invite", err)
 		}
 	} else if err != nil {
-		return "", fmtErr("person", err)
+		return "", nil, fmtErr("person", err)
+	}
+
+	if invite != "" {
+		var st Studio
+		err = s.db.QueryRowContext(ctx, `
+			SELECT s.id::text, s.name, s.accent_color
+			FROM invites i
+			JOIN studios s ON s.id = i.studio_id
+			WHERE i.code = $1 AND i.expires_at > $2`,
+			invite, s.now(),
+		).Scan(&st.ID, &st.Name, &st.Accent)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", nil, fmtErr("invite studio", err)
+		}
+		if err == nil {
+			studio = &st
+		}
 	}
 
 	code := DevCode
 	if !s.dev {
 		code, err = randomDigits(4)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 	}
 
@@ -83,7 +103,7 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 		WHERE phone = $1 AND consumed_at IS NULL`,
 		phone, s.now(),
 	); err != nil {
-		return "", fmtErr("invalidate", err)
+		return "", nil, fmtErr("invalidate", err)
 	}
 
 	if _, err := s.db.ExecContext(ctx, `
@@ -91,13 +111,13 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 		VALUES ($1, $2, $3)`,
 		phone, hashBytes(s.pepper, phone, code), s.now().Add(5*time.Minute),
 	); err != nil {
-		return "", fmtErr("insert code", err)
+		return "", nil, fmtErr("insert code", err)
 	}
 
 	if s.dev {
-		return code, nil
+		return code, studio, nil
 	}
-	return "", nil
+	return "", studio, nil
 }
 
 func (s *Service) Verify(ctx context.Context, rawPhone, code, invite string) (*Session, error) {
@@ -270,13 +290,25 @@ func (s *Service) loadSession(ctx context.Context, personID string) (*Session, e
 	var out Session
 	err := s.db.QueryRowContext(ctx, `
 		SELECT p.id, p.name, p.phone, COALESCE(b.role, ''),
-		       COALESCE(s.id::text, ''), COALESCE(s.name, ''), COALESCE(s.accent_color, '')
+		       COALESCE(s.id::text, ''), COALESCE(s.name, ''), COALESCE(s.accent_color, ''),
+		       COALESCE(b.onboarding ? 'experience', false),
+		       b.commitment_at IS NOT NULL,
+		       NOT EXISTS (
+		           SELECT 1 FROM workout_sessions ws
+		           WHERE ws.person_id = p.id
+		             AND ws.studio_id = s.id
+		             AND ws.finished_at IS NOT NULL
+		       )
 		FROM people p
 		LEFT JOIN bonds b ON b.id = p.active_bond_id
 		LEFT JOIN studios s ON s.id = b.studio_id
 		WHERE p.id = $1`,
 		personID,
-	).Scan(&out.Person.ID, &out.Person.Name, &out.Person.Phone, &out.Person.Role, &out.Studio.ID, &out.Studio.Name, &out.Studio.Accent)
+	).Scan(
+		&out.Person.ID, &out.Person.Name, &out.Person.Phone, &out.Person.Role,
+		&out.Studio.ID, &out.Studio.Name, &out.Studio.Accent,
+		&out.OnboardingComplete, &out.CommitmentComplete, &out.Debut,
+	)
 	if err != nil {
 		return nil, fmtErr("session payload", err)
 	}

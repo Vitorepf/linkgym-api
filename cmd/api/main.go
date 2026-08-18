@@ -12,6 +12,7 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/config"
 	"github.com/Vitorepf/linkgym-api/internal/db"
 	"github.com/Vitorepf/linkgym-api/internal/migrate"
+	"github.com/Vitorepf/linkgym-api/internal/onboard"
 	"github.com/Vitorepf/linkgym-api/internal/owner"
 	"github.com/Vitorepf/linkgym-api/internal/progress"
 	"github.com/Vitorepf/linkgym-api/internal/today"
@@ -43,6 +44,7 @@ func main() {
 		owner:    owner.New(database, time.Now),
 		progress: progress.New(database, time.Now),
 		workout:  workout.New(database, time.Now),
+		onboard:  onboard.New(database, time.Now),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", api.health)
@@ -61,6 +63,7 @@ func main() {
 	mux.HandleFunc("POST /v1/sessions/{id}/finish", api.withPerson(api.sessionFinish))
 	mux.HandleFunc("GET /v1/progress", api.withPerson(api.progressGet))
 	mux.HandleFunc("GET /v1/records", api.withPerson(api.recordsGet))
+	mux.HandleFunc("PUT /v1/onboarding", api.withPerson(api.onboardingPut))
 
 	server := &http.Server{
 		Addr:              addr,
@@ -79,6 +82,7 @@ type api struct {
 	owner    *owner.Service
 	progress *progress.Service
 	workout  *workout.Service
+	onboard  *onboard.Service
 }
 
 func (a *api) health(w http.ResponseWriter, _ *http.Request) {

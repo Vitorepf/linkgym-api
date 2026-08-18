@@ -51,7 +51,7 @@ func testService(t *testing.T) *Service {
 
 func TestUnknownPhoneNeedsInvite(t *testing.T) {
 	svc := testService(t)
-	_, err := svc.RequestCode(context.Background(), "+5511999888777", "")
+	_, _, err := svc.RequestCode(context.Background(), "+5511999888777", "")
 	if err != ErrInviteRequired {
 		t.Fatalf("err = %v", err)
 	}
@@ -60,7 +60,7 @@ func TestUnknownPhoneNeedsInvite(t *testing.T) {
 func TestVitorLogsInWithDevCode(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()
-	code, err := svc.RequestCode(ctx, seed.PhoneVitor, "")
+	code, _, err := svc.RequestCode(ctx, seed.PhoneVitor, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestVitorLogsInWithDevCode(t *testing.T) {
 func TestWrongCodeFails(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()
-	if _, err := svc.RequestCode(ctx, seed.PhoneFred, ""); err != nil {
+	if _, _, err := svc.RequestCode(ctx, seed.PhoneFred, ""); err != nil {
 		t.Fatal(err)
 	}
 	_, err := svc.Verify(ctx, seed.PhoneFred, "9999", "")
@@ -104,7 +104,7 @@ func TestWrongCodeFails(t *testing.T) {
 func TestFredDoesNotNeedInvite(t *testing.T) {
 	svc := testService(t)
 	ctx := context.Background()
-	if _, err := svc.RequestCode(ctx, seed.PhoneFred, ""); err != nil {
+	if _, _, err := svc.RequestCode(ctx, seed.PhoneFred, ""); err != nil {
 		t.Fatal(err)
 	}
 	session, err := svc.Verify(ctx, seed.PhoneFred, DevCode, "")

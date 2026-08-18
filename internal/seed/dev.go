@@ -12,11 +12,11 @@ const (
 	PhoneHuan  = "+5511900000003"
 	PhoneJose  = "+5511900000004"
 
-	StudioName   = "Fred"
-	AccentColor  = "#ec3013"
-	InviteVitor  = "FRED-VITOR"
-	InviteHuan   = "FRED-HUAN"
-	InviteJose   = "FRED-JOSE"
+	StudioName  = "Fred"
+	AccentColor = "#ec3013"
+	InviteVitor = "FRED-VITOR"
+	InviteHuan  = "FRED-HUAN"
+	InviteJose  = "FRED-JOSE"
 )
 
 type person struct {
@@ -73,14 +73,17 @@ func Dev(ctx context.Context, db *sql.DB) error {
 			continue
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO bonds (person_id, studio_id, role, status)
-			SELECT p.id, s.id, 'student', 'active'
+			INSERT INTO bonds (person_id, studio_id, role, status, onboarding)
+			SELECT p.id, s.id, 'student', 'active',
+			       '{"experience":"training","days_per_week":3,"pain":false}'::jsonb
 			FROM people p
 			JOIN people owner ON owner.phone = $1
 			JOIN studios s ON s.owner_person_id = owner.id
 			WHERE p.phone = $2
 			ON CONFLICT (person_id, studio_id) DO UPDATE
-			SET role = 'student', status = 'active', updated_at = now()`,
+			SET role = 'student', status = 'active',
+			    onboarding = '{"experience":"training","days_per_week":3,"pain":false}'::jsonb,
+			    updated_at = now()`,
 			PhoneFred, p.phone,
 		); err != nil {
 			return fmt.Errorf("student bond %s: %w", p.name, err)
