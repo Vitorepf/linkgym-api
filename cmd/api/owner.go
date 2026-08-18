@@ -73,6 +73,57 @@ func (a *api) ownerApplyReturn(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+type weekApproveReq struct {
+	PersonIDs []string `json:"person_ids"`
+}
+
+func (a *api) ownerWeek(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	items, err := a.owner.Week(r.Context(), sess.Person.ID, r.URL.Query().Get("from"))
+	if err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *api) ownerWeekApprove(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	var req weekApproveReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	n, err := a.owner.Approve(r.Context(), sess.Person.ID, req.PersonIDs)
+	if err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": n})
+}
+
+func (a *api) ownerStudent(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	got, err := a.owner.Student(r.Context(), sess.Person.ID, r.PathValue("id"))
+	if err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
 func writeOwnerError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, owner.ErrForbidden):

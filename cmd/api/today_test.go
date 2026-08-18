@@ -153,6 +153,59 @@ func TestOwnerApplyAttentionForbiddenAsStudent(t *testing.T) {
 	}
 }
 
+func TestOwnerWeekForbiddenAsStudent(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, seed.PhoneVitor)
+	req := httptest.NewRequest(http.MethodGet, "/v1/owner/week", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	a.withPerson(a.ownerWeek)(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"error":"nao_autorizado"`)) {
+		t.Fatalf("body %s", rec.Body.String())
+	}
+}
+
+func TestOwnerWeekApproveForbiddenAsStudent(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, seed.PhoneVitor)
+	req := httptest.NewRequest(http.MethodPost, "/v1/owner/week/approve", bytes.NewBufferString(`{"person_ids":[]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	a.withPerson(a.ownerWeekApprove)(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOwnerStudentForbiddenAsStudent(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, seed.PhoneVitor)
+	req := httptest.NewRequest(http.MethodGet, "/v1/owner/students/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.SetPathValue("id", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+	rec := httptest.NewRecorder()
+	a.withPerson(a.ownerStudent)(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOwnerStudentNotFound(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, seed.PhoneFred)
+	req := httptest.NewRequest(http.MethodGet, "/v1/owner/students/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.SetPathValue("id", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+	rec := httptest.NewRecorder()
+	a.withPerson(a.ownerStudent)(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestOwnerApplyReturnNotFound(t *testing.T) {
 	a := testAPI(t)
 	token := loginToken(t, a, seed.PhoneFred)
