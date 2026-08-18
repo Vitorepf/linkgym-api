@@ -20,6 +20,7 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/owner"
 	"github.com/Vitorepf/linkgym-api/internal/seed"
 	"github.com/Vitorepf/linkgym-api/internal/today"
+	"github.com/Vitorepf/linkgym-api/internal/workout"
 )
 
 func TestMain(m *testing.M) {
@@ -62,10 +63,11 @@ func testAPI(t *testing.T) *api {
 	t.Helper()
 	database := openSeeded(t)
 	return &api{
-		db:    database,
-		auth:  auth.New(database, "test-pepper", true),
-		today: today.New(database, time.Now),
-		owner: owner.New(database, time.Now),
+		db:      database,
+		auth:    auth.New(database, "test-pepper", true),
+		today:   today.New(database, time.Now),
+		owner:   owner.New(database, time.Now),
+		workout: workout.New(database, time.Now),
 	}
 }
 
