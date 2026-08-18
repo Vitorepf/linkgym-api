@@ -294,6 +294,21 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 	if err != nil {
 		return nil, err
 	}
+	badgeKeys := []string{}
+	if len(records) > 0 {
+		res, err := tx.ExecContext(ctx, `
+			INSERT INTO badges (studio_id, person_id, badge_key)
+			VALUES ($1, $2, 'primeiro_pr')
+			ON CONFLICT (studio_id, person_id, badge_key) DO NOTHING`,
+			studioID, personID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("finish primeiro_pr: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			badgeKeys = append(badgeKeys, "primeiro_pr")
+		}
+	}
 	for i := 0; i < prXP/25; i++ {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO xp_ledger (bond_id, amount, reason, session_id)
@@ -355,7 +370,7 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 		XPGained:  10 + prXP,
 		XPTotal:   xpTotal,
 		Records:   records,
-		BadgeKeys: []string{},
+		BadgeKeys: badgeKeys,
 	}
 	if result.Records == nil {
 		result.Records = []Record{}

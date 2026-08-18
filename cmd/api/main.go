@@ -13,6 +13,7 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/db"
 	"github.com/Vitorepf/linkgym-api/internal/migrate"
 	"github.com/Vitorepf/linkgym-api/internal/owner"
+	"github.com/Vitorepf/linkgym-api/internal/progress"
 	"github.com/Vitorepf/linkgym-api/internal/today"
 	"github.com/Vitorepf/linkgym-api/internal/workout"
 )
@@ -36,11 +37,12 @@ func main() {
 	addr := ":" + config.Getenv("PORT", "8080")
 	dev := config.Getenv("ENV", "development") == "development"
 	api := &api{
-		db:      database,
-		auth:    auth.New(database, config.Getenv("AUTH_PEPPER", ""), dev),
-		today:   today.New(database, time.Now),
-		owner:   owner.New(database, time.Now),
-		workout: workout.New(database, time.Now),
+		db:       database,
+		auth:     auth.New(database, config.Getenv("AUTH_PEPPER", ""), dev),
+		today:    today.New(database, time.Now),
+		owner:    owner.New(database, time.Now),
+		progress: progress.New(database, time.Now),
+		workout:  workout.New(database, time.Now),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", api.health)
@@ -57,6 +59,8 @@ func main() {
 	mux.HandleFunc("POST /v1/sessions/{id}/sets", api.withPerson(api.sessionAddSet))
 	mux.HandleFunc("POST /v1/sessions/{id}/swap", api.withPerson(api.sessionSwap))
 	mux.HandleFunc("POST /v1/sessions/{id}/finish", api.withPerson(api.sessionFinish))
+	mux.HandleFunc("GET /v1/progress", api.withPerson(api.progressGet))
+	mux.HandleFunc("GET /v1/records", api.withPerson(api.recordsGet))
 
 	server := &http.Server{
 		Addr:              addr,
@@ -69,11 +73,12 @@ func main() {
 }
 
 type api struct {
-	db      *sql.DB
-	auth    *auth.Service
-	today   *today.Service
-	owner   *owner.Service
-	workout *workout.Service
+	db       *sql.DB
+	auth     *auth.Service
+	today    *today.Service
+	owner    *owner.Service
+	progress *progress.Service
+	workout  *workout.Service
 }
 
 func (a *api) health(w http.ResponseWriter, _ *http.Request) {
