@@ -215,6 +215,17 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 		return got, nil
 	}
 
+	var setCount int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT count(*) FROM workout_sets WHERE session_id = $1`,
+		sessionID,
+	).Scan(&setCount); err != nil {
+		return nil, fmt.Errorf("finish set count: %w", err)
+	}
+	if setCount == 0 {
+		return nil, ErrEmptySession
+	}
+
 	now := s.now()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE workout_sessions
@@ -265,7 +276,11 @@ func (s *Service) Finish(ctx context.Context, personID, sessionID string, effort
 		INSERT INTO streaks (bond_id, current_count, last_fulfilled_on, protector_available)
 		VALUES ($1, 1, $2::date, true)
 		ON CONFLICT (bond_id) DO UPDATE SET
-			current_count = streaks.current_count + 1,
+			current_count = CASE
+				WHEN streaks.last_fulfilled_on IS NOT DISTINCT FROM EXCLUDED.last_fulfilled_on
+				THEN streaks.current_count
+				ELSE streaks.current_count + 1
+			END,
 			last_fulfilled_on = EXCLUDED.last_fulfilled_on,
 			updated_at = now()`,
 		bondID, fulfilled,

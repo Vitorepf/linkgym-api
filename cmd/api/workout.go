@@ -102,7 +102,7 @@ func writeWorkoutError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, workout.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, workout.ErrInvalid):
+	case errors.Is(err, workout.ErrInvalid), errors.Is(err, workout.ErrEmptySession):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "erro")

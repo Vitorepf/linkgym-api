@@ -317,6 +317,97 @@ func TestFinishTwiceDoesNotDoubleXP(t *testing.T) {
 	}
 }
 
+func TestSecondFinishSameDayDoesNotDoubleStreak(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	lift := vitorSupinoToday(t, database)
+	ctx := context.Background()
+
+	if _, err := database.Exec(`DELETE FROM personal_records WHERE person_id = $1`, lift.personID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		UPDATE streaks SET current_count = 0, last_fulfilled_on = NULL
+		WHERE bond_id = (SELECT active_bond_id FROM people WHERE id = $1)`,
+		lift.personID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	finish := func(loadKg float64) *FinishResult {
+		t.Helper()
+		started, err := svc.Start(ctx, lift.personID, newUUID(), lift.prescriptionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.AddSet(ctx, lift.personID, started.ID, SetInput{
+			ClientSetID:        newUUID(),
+			PrescriptionItemID: lift.itemID,
+			ExerciseID:         lift.exerciseID,
+			SetIndex:           1,
+			Reps:               10,
+			LoadKg:             loadKg,
+			RestSeconds:        90,
+			PerformedAt:        time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := svc.Finish(ctx, lift.personID, started.ID, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	first := finish(40)
+	if first.Streak.CurrentCount != 1 {
+		t.Fatalf("first streak %d want 1", first.Streak.CurrentCount)
+	}
+	if first.XPGained != 35 {
+		t.Fatalf("first xp_gained %d want 35", first.XPGained)
+	}
+
+	second := finish(45)
+	if second.Streak.CurrentCount != 1 {
+		t.Fatalf("second streak %d want 1 (same for_date)", second.Streak.CurrentCount)
+	}
+	if second.XPGained != 35 {
+		t.Fatalf("second xp_gained %d want 35 (10 session + 25 pr)", second.XPGained)
+	}
+	if len(second.Records) != 1 || second.Records[0].LoadKg != 45 || second.Records[0].PreviousKg != 40 {
+		t.Fatalf("second records %+v", second.Records)
+	}
+}
+
+func TestFinishWithNoSetsRejected(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	lift := vitorSupinoToday(t, database)
+	ctx := context.Background()
+	started, err := svc.Start(ctx, lift.personID, newUUID(), lift.prescriptionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Finish(ctx, lift.personID, started.ID, 2)
+	if err != ErrEmptySession {
+		t.Fatalf("got %v want %v", err, ErrEmptySession)
+	}
+	var finished sql.NullTime
+	if err := database.QueryRow(`SELECT finished_at FROM workout_sessions WHERE id = $1`, started.ID).Scan(&finished); err != nil {
+		t.Fatal(err)
+	}
+	if finished.Valid {
+		t.Fatal("empty session should stay open")
+	}
+	var n int
+	if err := database.QueryRow(`SELECT count(*) FROM xp_ledger WHERE session_id = $1`, started.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("xp rows %d", n)
+	}
+}
+
 func TestFinishForbiddenForOtherPerson(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
