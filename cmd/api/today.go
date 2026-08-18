@@ -1,11 +1,42 @@
 package main
 
-import "net/http"
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/Vitorepf/linkgym-api/internal/today"
+)
 
 func (a *api) todayGet(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	got, err := a.today.Today(r.Context(), sess.Person.ID)
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "erro")
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+type readinessReq struct {
+	Energy   int `json:"energy"`
+	Soreness int `json:"soreness"`
+	Sleep    int `json:"sleep"`
+}
+
+func (a *api) todayReadinessPut(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	var req readinessReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	got, err := a.today.PutReadiness(r.Context(), sess.Person.ID, req.Energy, req.Soreness, req.Sleep)
+	if err != nil {
+		if errors.Is(err, today.ErrReadinessInvalid) {
+			writeError(w, http.StatusBadRequest, "invalido")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "erro")
 		return
 	}

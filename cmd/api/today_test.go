@@ -131,3 +131,55 @@ func TestTodayUnauthorizedWithoutToken(t *testing.T) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestReadinessPutUnauthorized(t *testing.T) {
+	a := testAPI(t)
+	req := httptest.NewRequest(http.MethodPut, "/v1/today/readiness", bytes.NewBufferString(`{"energy":4,"soreness":2,"sleep":4}`))
+	rec := httptest.NewRecorder()
+	a.withPerson(a.todayReadinessPut)(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestReadinessPutInvalidBody(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, "+5511900000002")
+	body := bytes.NewBufferString(`{"energy":0,"soreness":3,"sleep":3}`)
+	req := httptest.NewRequest(http.MethodPut, "/v1/today/readiness", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	a.withPerson(a.todayReadinessPut)(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestReadinessPutReturnsScore(t *testing.T) {
+	a := testAPI(t)
+	token := loginToken(t, a, "+5511900000002")
+	body := bytes.NewBufferString(`{"energy":4,"soreness":2,"sleep":4}`)
+	req := httptest.NewRequest(http.MethodPut, "/v1/today/readiness", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	a.withPerson(a.todayReadinessPut)(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Score    int    `json:"score"`
+		Energy   int    `json:"energy"`
+		Soreness int    `json:"soreness"`
+		Sleep    int    `json:"sleep"`
+		Label    string `json:"label"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Score != 80 || got.Energy != 4 || got.Soreness != 2 || got.Sleep != 4 {
+		t.Fatalf("%+v", got)
+	}
+	if got.Label != "Pode ir com carga" {
+		t.Fatalf("%s", got.Label)
+	}
+}

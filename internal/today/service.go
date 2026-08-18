@@ -3,7 +3,9 @@ package today
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 )
@@ -129,10 +131,8 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("today readiness: %w", err)
 	}
-	if err == nil {
-		out.Readiness.Energy = int(energy.Int64)
-		out.Readiness.Soreness = int(soreness.Int64)
-		out.Readiness.Sleep = int(sleep.Int64)
+	if err == nil && energy.Valid && soreness.Valid && sleep.Valid {
+		out.Readiness = readinessFrom(int(energy.Int64), int(soreness.Int64), int(sleep.Int64))
 	}
 
 	if err := s.db.QueryRowContext(ctx, `
@@ -241,6 +241,57 @@ func (s *Service) loadItems(ctx context.Context, prescriptionID string) ([]Item,
 		items = append(items, it)
 	}
 	return items, rows.Err()
+}
+
+var ErrReadinessInvalid = errors.New("invalido")
+
+func (s *Service) PutReadiness(ctx context.Context, personID string, energy, soreness, sleep int) (Readiness, error) {
+	if !inScale(energy) || !inScale(soreness) || !inScale(sleep) {
+		return Readiness{}, ErrReadinessInvalid
+	}
+	day := s.now().Format("2006-01-02")
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO readiness_logs (person_id, for_date, energy, soreness, sleep)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (person_id, for_date)
+		DO UPDATE SET energy = EXCLUDED.energy,
+		              soreness = EXCLUDED.soreness,
+		              sleep = EXCLUDED.sleep`,
+		personID, day, energy, soreness, sleep,
+	)
+	if err != nil {
+		return Readiness{}, fmt.Errorf("put readiness: %w", err)
+	}
+	return readinessFrom(energy, soreness, sleep), nil
+}
+
+func inScale(n int) bool {
+	return n >= 1 && n <= 5
+}
+
+func readinessFrom(energy, soreness, sleep int) Readiness {
+	n := score(energy, soreness, sleep)
+	return Readiness{
+		Score:    n,
+		Energy:   energy,
+		Soreness: soreness,
+		Sleep:    sleep,
+		Label:    label(n),
+	}
+}
+
+func score(energy, soreness, sleep int) int {
+	return int(math.Round(float64(energy+(6-soreness)+sleep) / 15.0 * 100))
+}
+
+func label(n int) string {
+	if n >= 70 {
+		return "Pode ir com carga"
+	}
+	if n >= 40 {
+		return "Hoje não é dia de PR"
+	}
+	return "Versão leve"
 }
 
 func formatKg(kg float64) string {

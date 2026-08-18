@@ -60,6 +60,63 @@ func personIDByPhone(t *testing.T, database *sql.DB, phone string) string {
 	return id
 }
 
+func TestReadinessScore(t *testing.T) {
+	if g := score(4, 2, 4); g != 80 {
+		t.Fatalf("%d", g)
+	}
+	if label(80) != "Pode ir com carga" {
+		t.Fatalf("%s", label(80))
+	}
+	if label(34) != "Versão leve" {
+		t.Fatal(label(34))
+	}
+}
+
+func TestReadinessUpsert(t *testing.T) {
+	db := openSeeded(t)
+	svc := New(db, time.Now)
+	vitorID := personIDByPhone(t, db, "+5511900000002")
+
+	got, err := svc.PutReadiness(context.Background(), vitorID, 4, 2, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Score != 80 || got.Energy != 4 || got.Soreness != 2 || got.Sleep != 4 {
+		t.Fatalf("%+v", got)
+	}
+	if got.Label != "Pode ir com carga" {
+		t.Fatalf("%s", got.Label)
+	}
+
+	today, err := svc.Today(context.Background(), vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if today.Readiness.Score != 80 || today.Readiness.Label != "Pode ir com carga" {
+		t.Fatalf("today after save %+v", today.Readiness)
+	}
+
+	got, err = svc.PutReadiness(context.Background(), vitorID, 1, 5, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Score != 20 || got.Label != "Versão leve" {
+		t.Fatalf("second put %+v", got)
+	}
+}
+
+func TestReadinessUpsertRejectsOutOfRange(t *testing.T) {
+	db := openSeeded(t)
+	svc := New(db, time.Now)
+	vitorID := personIDByPhone(t, db, "+5511900000002")
+	if _, err := svc.PutReadiness(context.Background(), vitorID, 0, 3, 3); err != ErrReadinessInvalid {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := svc.PutReadiness(context.Background(), vitorID, 6, 3, 3); err != ErrReadinessInvalid {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestTodayLoadIsThePersons(t *testing.T) {
 	db := openSeeded(t)
 	svc := New(db, time.Now)

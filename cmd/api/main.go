@@ -47,6 +47,7 @@ func main() {
 	mux.HandleFunc("GET /v1/me", api.me)
 	mux.HandleFunc("POST /v1/auth/logout", api.logout)
 	mux.HandleFunc("GET /v1/today", api.withPerson(api.todayGet))
+	mux.HandleFunc("PUT /v1/today/readiness", api.withPerson(api.todayReadinessPut))
 	mux.HandleFunc("GET /v1/owner/home", api.withPerson(api.ownerHome))
 
 	server := &http.Server{
