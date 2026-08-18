@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+start=$SECONDS
 
 if ! command -v go >/dev/null 2>&1; then
-  echo "Instale Go 1.26+: https://go.dev/dl/"
+  echo "Instale Go 1.26+ uma vez: https://go.dev/dl/"
   exit 1
 fi
 
@@ -16,7 +17,7 @@ fi
 echo "Go $(go env GOVERSION) ok"
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "Instale Docker Desktop ou OrbStack."
+  echo "Instale Docker Desktop ou OrbStack uma vez."
   exit 1
 fi
 
@@ -33,7 +34,15 @@ else
   echo ".env já existe — não mexi"
 fi
 
-docker compose up -d postgres minio createbucket
+echo "baixando módulos Go e subindo Postgres + MinIO..."
+go mod download &
+mod_pid=$!
+if ! docker compose up -d postgres minio createbucket; then
+  echo "Docker não subiu. Porta 5436 (Postgres) ou 9000/9001 (MinIO) já ocupada?"
+  kill "$mod_pid" 2>/dev/null || true
+  exit 1
+fi
+wait "$mod_pid"
 
 echo "esperando Postgres..."
 ok=0
@@ -65,20 +74,26 @@ if [ "$ok" -ne 1 ]; then
 fi
 echo "MinIO :9000 ok"
 
-echo "migrations..."
 set -a
 # shellcheck disable=SC1091
 . ./.env
 set +a
+
+echo "migrations..."
 go run ./cmd/migrate
 
 echo "seed (Fred + Vitor, Huan, Jose)..."
 go run ./cmd/seed
 
+echo "testes..."
 go test ./...
 
+elapsed=$((SECONDS - start))
 echo ""
-echo "Ambiente pronto. Próximo: make start"
+echo "Ambiente pronto em ${elapsed}s. Próximo: make start"
 echo "Health: http://localhost:8080/health"
 echo "MinIO console: http://localhost:9001  (linkgym / linkgymsecret)"
 echo "Seed: Fred (personal) + alunos Vitor, Huan, Jose — telefones no README"
+if [ "$elapsed" -gt 60 ]; then
+  echo "Aviso: passou de 1 minuto. Na primeira vez as imagens Docker pesam; a segunda é rápida."
+fi

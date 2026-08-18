@@ -4,7 +4,7 @@
 
 help:
 	@echo "LinkGym API"
-	@echo "  make setup    Go + Docker + .env + Postgres + MinIO + migrations + seed + testes"
+	@echo "  make setup    1 comando: deps Go + Postgres + MinIO + schema + seed + testes"
 	@echo "  make start    API em http://localhost:8080"
 	@echo "  make migrate  só as migrations"
 	@echo "  make seed     Fred + Vitor, Huan, Jose (dev)"

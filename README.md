@@ -2,13 +2,15 @@
 
 API do LinkGym. Go + Postgres. App: [linkgym-app](https://github.com/Vitorepf/linkgym-app).
 
-## Subir (back)
+## Subir (back) — ~1 minuto
 
-Na máquina, só isto:
+Uma vez na máquina (não conta no minuto):
 
 1. [Go 1.26+](https://go.dev/dl/)
-2. [Docker Desktop](https://www.docker.com/products/docker-desktop/) ou [OrbStack](https://orbstack.dev/) — aberto, não só instalado
-3. Acesso a este repo (é privado — peça convite no GitHub)
+2. [Docker Desktop](https://www.docker.com/products/docker-desktop/) ou [OrbStack](https://orbstack.dev/) — **aberto**
+3. Convite neste repo (é privado)
+
+Depois, só isto:
 
 ```bash
 git clone https://github.com/Vitorepf/linkgym-api.git
@@ -17,7 +19,7 @@ make setup
 make start
 ```
 
-`make setup` confere Go e Docker, cria o `.env`, sobe Postgres + MinIO, aplica as migrations, **semeia o Fred e os três alunos** e roda os testes.
+`make setup` instala os módulos Go (`go.sum`), cria o `.env`, sobe Postgres + MinIO, aplica as migrations, semeia Fred/Vitor/Huan/Jose e roda os testes. Não tem segundo comando de dependência.
 
 `make start` sobe a API. Pronto quando [http://localhost:8080/health](http://localhost:8080/health) responder `{"status":"ok","service":"linkgym-api"}`.
 
