@@ -142,6 +142,7 @@ func (s *Service) loadFio(ctx context.Context, studioID, today string) (Fio, err
 		if err := rows.Scan(&d.ForDate, &d.Prescribed, &d.Done); err != nil {
 			return Fio{}, fmt.Errorf("owner fio scan: %w", err)
 		}
+		d.ForDate = dateKey(d.ForDate)
 		byDay[d.ForDate] = d
 	}
 	if err := rows.Err(); err != nil {
@@ -158,12 +159,25 @@ func (s *Service) loadFio(ctx context.Context, studioID, today string) (Fio, err
 		week = append(week, FioDay{ForDate: key})
 	}
 
-	todayFio := byDay[today]
+	todayFio := byDay[dateKey(today)]
 	return Fio{
 		Prescribed: todayFio.Prescribed,
 		Done:       todayFio.Done,
 		Week:       week,
 	}, nil
+}
+
+// dateKey keeps map keys as YYYY-MM-DD so SQL DATE::text and Go today match.
+func dateKey(s string) string {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t.Format("2006-01-02")
+	}
+	if len(s) >= 10 {
+		if t, err := time.Parse("2006-01-02", s[:10]); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return s
 }
 
 func isoWeekBounds(t time.Time) (time.Time, time.Time) {
