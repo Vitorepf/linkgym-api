@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	loadDotEnv(".env")
 	addr := ":" + getenv("PORT", "8080")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health)

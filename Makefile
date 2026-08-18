@@ -1,23 +1,23 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help setup up down logs api dev tidy test
+.PHONY: help setup start api dev down logs test tidy docker doctor
 
 help:
 	@echo "LinkGym API"
-	@echo "  make setup  copia .env (se faltar) e sobe Postgres + MinIO"
-	@echo "  make api    sobe a API em http://localhost:8080"
-	@echo "  make dev    setup + api (o que o sócio usa no dia a dia)"
-	@echo "  make down   para o Docker"
-	@echo "  make test   testes"
+	@echo "  make setup  Go + Docker + .env + Postgres + MinIO + testes"
+	@echo "  make start  API em http://localhost:8080"
+	@echo "  make down   para Postgres e MinIO"
+	@echo "  make test   só os testes"
+	@echo "  make docker sobe tudo no Compose, inclusive a API"
 
 setup:
-	@test -f .env || cp .env.example .env
-	docker compose up -d postgres minio createbucket
-	@echo ""
-	@echo "Pronto. Postgres :5436  MinIO :9000  console :9001 (linkgym / linkgymsecret)"
-	@echo "Agora: make api"
+	bash scripts/setup.sh
 
-up: setup
+start api:
+	go run ./cmd/api
+
+dev: setup
+	go run ./cmd/api
 
 down:
 	docker compose down
@@ -25,14 +25,14 @@ down:
 logs:
 	docker compose logs -f postgres minio
 
-api:
-	go run ./cmd/api
-
-dev: setup
-	go run ./cmd/api
+test:
+	go test ./...
 
 tidy:
 	go mod tidy
 
-test:
-	go test ./...
+docker:
+	@test -f .env || cp .env.example .env
+	docker compose up --build
+
+doctor: setup
