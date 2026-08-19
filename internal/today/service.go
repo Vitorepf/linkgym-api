@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"time"
 )
 
@@ -30,9 +29,20 @@ type Payload struct {
 	XPTotal      int           `json:"xp_total"`
 	Prescription *Prescription `json:"prescription"`
 	Banner       *Banner       `json:"banner"`
-	CoachLine    string        `json:"coach_line"`
-	Debut        bool          `json:"debut"`
-	Comeback     *Comeback     `json:"comeback"`
+
+	// A frase que o PERSONAL escreveu ao publicar a Prescricao de hoje, literal. Vazia
+	// quando ele nao escreveu nada — e vazia significa que a tela nao desenha nada: o
+	// produto nao tem frase de reserva para por na boca de outra pessoa.
+	CoachLine string    `json:"coach_line"`
+	Debut     bool      `json:"debut"`
+	Comeback  *Comeback `json:"comeback"`
+
+	// Cumprimento: a Sessao prescrita de HOJE fechada. Nunca volume, nunca carga, nunca
+	// percentual do prescrito — ver o verbete no CONTEXT.md. E o unico ato que fecha o dia
+	// da Ofensiva, e a tela precisa dele para acender o contador sem custar rolagem.
+	//
+	// Sem ficha publicada hoje nao ha o que cumprir, e o campo e false.
+	Cumprido bool `json:"cumprido"`
 }
 
 type Time struct {
@@ -78,6 +88,16 @@ type Item struct {
 	RestSeconds *int    `json:"rest_seconds"`
 	Notes       *string `json:"notes"`
 	VideoURL    *string `json:"video_url"`
+
+	// O que o CORPO dele fez da ultima vez neste exercicio, para a tela ter contra o que
+	// comparar a carga de hoje. Nao e a carga prescrita: sai de workout_sets, a serie
+	// executada. Quem manda no campo continua sendo a Prescricao — o personal decide a
+	// carga —, e isto entra ao lado, como referencia.
+	//
+	// Ponteiro porque a ausencia precisa ser dizivel: primeira vez naquele exercicio nao
+	// tem anterior, e a tela desenha o traco em vez de inventar numero.
+	LastKg   *float64 `json:"last_kg"`
+	LastReps *int     `json:"last_reps"`
 }
 
 type Banner struct {
@@ -172,19 +192,34 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		return nil, err
 	}
 
+	// Calculado ANTES da consulta da ficha, porque aquela sai cedo com ErrNoRows quando
+	// nao ha prescricao hoje — e o campo tem que estar preenchido nos dois caminhos.
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM workout_sessions ws
+			JOIN prescriptions pr ON pr.id = ws.prescription_id
+			WHERE pr.person_id = $1 AND pr.studio_id = $2 AND pr.for_date = $3
+			  AND pr.status = 'published' AND ws.finished_at IS NOT NULL
+		)`,
+		personID, out.Time.ID, day,
+	).Scan(&out.Cumprido); err != nil {
+		return nil, fmt.Errorf("today cumprido: %w", err)
+	}
+
 	var (
 		prID   string
 		prName string
 		prDate string
+		frase  sql.NullString
 	)
 	err = s.db.QueryRowContext(ctx, `
-		SELECT pr.id::text, m.name, pr.for_date::text
+		SELECT pr.id::text, m.name, pr.for_date::text, pr.coach_line
 		FROM prescriptions pr
 		JOIN models m ON m.id = pr.model_id
 		WHERE pr.person_id = $1 AND pr.studio_id = $2
 		  AND pr.for_date = $3 AND pr.status = 'published'`,
 		personID, out.Time.ID, day,
-	).Scan(&prID, &prName, &prDate)
+	).Scan(&prID, &prName, &prDate, &frase)
 	if err == sql.ErrNoRows {
 		return &out, nil
 	}
@@ -192,7 +227,7 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		return nil, fmt.Errorf("today prescription: %w", err)
 	}
 
-	items, err := s.loadItems(ctx, prID)
+	items, err := s.loadItems(ctx, prID, personID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,13 +242,19 @@ func (s *Service) Today(ctx context.Context, personID string) (*Payload, error) 
 		Text: fmt.Sprintf("%s publicou o %s", out.Time.Name, prName),
 		Kind: "published",
 	}
-	if len(items) > 0 {
-		out.CoachLine = fmt.Sprintf("%s em %s. Técnica, não ego.", items[0].Name, formatKg(items[0].LoadKg))
-	}
+	// A frase do personal, LITERAL, ou nada.
+	//
+	// Aqui morava um template: "<exercicio> em <carga>. Tecnica, nao ego." — uma frase de
+	// produto que a tela do aluno desenhava embaixo do rosto e do nome de quem nao a
+	// escreveu. O campo agora e o texto que ele digitou ao publicar (prescriptions.
+	// coach_line), e sem texto o campo volta vazio: a tela nao tem o que desenhar, e e
+	// exatamente esse o conserto. Nao ha frase de reserva, porque frase de reserva com o
+	// nome dele em cima e o defeito, nao a saida dele.
+	out.CoachLine = frase.String
 	return &out, nil
 }
 
-func (s *Service) loadItems(ctx context.Context, prescriptionID string) ([]Item, error) {
+func (s *Service) loadItems(ctx context.Context, prescriptionID, personID string) ([]Item, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pi.id::text, pi.exercise_id::text, e.name, pi.position,
 		       pi.planned_sets, pi.planned_reps, pi.load_kg, pi.rest_seconds,
@@ -260,7 +301,73 @@ func (s *Service) loadItems(ctx context.Context, prescriptionID string) ([]Item,
 		}
 		items = append(items, it)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.attachLast(ctx, personID, items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// attachLast pendura, em cada item, a ultima serie EXECUTADA daquele exercicio por aquela
+// pessoa. Uma consulta so para a ficha inteira: DISTINCT ON devolve a linha mais recente
+// por exercicio, e o indice de workout_sets ja serve a ordenacao.
+//
+// `finished_at IS NOT NULL` e o que separa "a ultima vez" de "agora": a sessao de hoje,
+// enquanto aberta, tem finished_at nulo e por isso nao se conta como referencia de si
+// mesma. Dentro da sessao, quem herda a carga da serie anterior e o proprio app.
+func (s *Service) attachLast(ctx context.Context, personID string, items []Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT ON (ws.exercise_id) ws.exercise_id::text, ws.load_kg, ws.reps
+		FROM workout_sets ws
+		JOIN workout_sessions sess ON sess.id = ws.session_id
+		WHERE sess.person_id = $1
+		  AND sess.finished_at IS NOT NULL
+		  AND ws.load_kg IS NOT NULL
+		ORDER BY ws.exercise_id, ws.performed_at DESC`,
+		personID,
+	)
+	if err != nil {
+		return fmt.Errorf("today last sets: %w", err)
+	}
+	defer rows.Close()
+
+	type ultima struct {
+		kg   float64
+		reps sql.NullInt64
+	}
+	porExercicio := map[string]ultima{}
+	for rows.Next() {
+		var (
+			id string
+			u  ultima
+		)
+		if err := rows.Scan(&id, &u.kg, &u.reps); err != nil {
+			return fmt.Errorf("today last sets scan: %w", err)
+		}
+		porExercicio[id] = u
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for i := range items {
+		u, ok := porExercicio[items[i].ExerciseID]
+		if !ok {
+			continue
+		}
+		kg := u.kg
+		items[i].LastKg = &kg
+		if u.reps.Valid {
+			r := int(u.reps.Int64)
+			items[i].LastReps = &r
+		}
+	}
+	return nil
 }
 
 var (
@@ -268,7 +375,15 @@ var (
 	ErrNotFound         = errors.New("nao_encontrado")
 )
 
-const comebackCoachLine = "Sem culpa. Nove minutos e você está de volta."
+// A linha da Retomada diz o que CONTINUA DE PE, e so isso.
+//
+// Ela dizia "Sem culpa. Nove minutos e voce esta de volta." e tinha dois defeitos. O
+// primeiro: nomear a culpa para nega-la ainda planta a palavra, e a barra do eixo 3
+// (docs/barra/eixo3-ritual-aluno/) mostra o oposto — no Duolingo o dia perdido e igual ao
+// dia futuro, sem X, sem vermelho e sem mencao a falha. O segundo: "Nove minutos" repetia
+// em prosa o campo Minutes, que a tela ja desenha como "9 MIN" no proprio botao; bastava
+// Minutes mudar para a frase mentir.
+const comebackCoachLine = "Sua carga e seus recordes continuam aí."
 
 func (s *Service) applyYesterdayMiss(ctx context.Context, personID, studioID, bondID string, now time.Time) error {
 	today := now.Format("2006-01-02")
@@ -354,6 +469,18 @@ func (s *Service) applyYesterdayMiss(ctx context.Context, personID, studioID, bo
 			return fmt.Errorf("today miss zero: %w", err)
 		}
 	}
+
+	// A Retomada nasce AQUI, na primeira falta, dentro do mesmo commit que mexe na
+	// Ofensiva. Antes o unico caminho automatico era openD11Comeback, que so abre depois de
+	// ONZE dias de silencio (`calendarDays(anchor, now) < 11`); fora dele, so nascia quando
+	// o personal aplicava um student_stopped da fila. Ou seja: quem faltou ontem nao via
+	// nada, e a volta dependia de outra pessoa agir.
+	//
+	// missedOn e ONTEM, o dia que a prescricao ficou sem sessao — e o UNIQUE
+	// (bond_id, missed_on) da tabela e o que impede a mesma falta de abrir duas.
+	if err := upsertOpenComeback(ctx, tx, bondID, yesterday); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -385,11 +512,26 @@ func (s *Service) openD11Comeback(ctx context.Context, personID, studioID, bondI
 		return nil
 	}
 
-	if calendarDays(anchor.Time, now) < 11 {
+	// MARCO DE CALENDARIO, nao dia arbitrario.
+	//
+	// Era `calendarDays(anchor, now) < 11`: o convite de volta caia no decimo primeiro dia
+	// de silencio, que nao e nada para quem recebe — cai numa quarta-feira qualquer, no meio
+	// da tarde. Marco e dia que a pessoa ja trata como recomeco, e por isso o convite pega.
+	//
+	// Marcos que sao computaveis SO da data, sem dado novo e sem dependencia nova: segunda
+	// e dia 1º. Feriado e aniversario tambem sao marcos e ficam de fora por falta de dado —
+	// nao existe data de nascimento em `people` nem tabela de feriados, e inventar
+	// qualquer um dos dois seria marco falso. Declarado aqui em vez de silenciado.
+	if calendarDays(anchor.Time, now) < 7 || !marcoDeCalendario(now) {
 		return nil
 	}
 
 	return upsertOpenComeback(ctx, s.db, bondID, now.Format("2006-01-02"))
+}
+
+// marcoDeCalendario diz se o dia e um recomeco que a pessoa ja reconhece sozinha.
+func marcoDeCalendario(t time.Time) bool {
+	return t.Weekday() == time.Monday || t.Day() == 1
 }
 
 func calendarDays(from, to time.Time) int {
@@ -538,11 +680,4 @@ func label(n int) string {
 		return "Hoje não é dia de PR"
 	}
 	return "Versão leve"
-}
-
-func formatKg(kg float64) string {
-	if kg == float64(int64(kg)) {
-		return strconv.FormatInt(int64(kg), 10)
-	}
-	return strconv.FormatFloat(kg, 'f', -1, 64)
 }

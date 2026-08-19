@@ -35,8 +35,14 @@ seed:
 
 # -p 1: os 15 pacotes de teste abrem o MESMO DATABASE_URL e re-semeiam por cima uns dos
 # outros em paralelo. Serial passa sempre; paralelo falha em rodadas alternadas.
+#
+# TZ=UTC: o Go le o fuso da maquina e o Postgres do compose roda em UTC. O servico monta o
+# dia com s.now().Format("2006-01-02") e o seed com current_date — entre 21h e meia-noite
+# no horario de Brasilia os dois apontam para DIAS DIFERENTES, e os testes de hoje falham
+# com "sem ficha de hoje" sem nada estar quebrado. Custou uma investigacao inteira; fica
+# fixado aqui para nao custar a proxima.
 test:
-	set -a; [ -f .env ] && . ./.env; set +a; go test -p 1 ./...
+	set -a; [ -f .env ] && . ./.env; set +a; TZ=UTC go test -p 1 ./...
 
 tidy:
 	go mod tidy

@@ -182,7 +182,7 @@ func TestLoteKeepsDifferentLoads(t *testing.T) {
 		t.Fatalf("vitor draft %v want 40", draft.Items[0].LoadKg)
 	}
 
-	if err := svc.Publish(context.Background(), fredID, draft.DraftID, []string{huanID}); err != nil {
+	if err := svc.Publish(context.Background(), fredID, draft.DraftID, []string{huanID}, ""); err != nil {
 		t.Fatal(err)
 	}
 

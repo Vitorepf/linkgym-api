@@ -11,11 +11,13 @@ import (
 	"github.com/Vitorepf/linkgym-api/internal/auth"
 	"github.com/Vitorepf/linkgym-api/internal/config"
 	"github.com/Vitorepf/linkgym-api/internal/db"
+	"github.com/Vitorepf/linkgym-api/internal/media"
 	"github.com/Vitorepf/linkgym-api/internal/migrate"
 	"github.com/Vitorepf/linkgym-api/internal/onboard"
 	"github.com/Vitorepf/linkgym-api/internal/owner"
 	"github.com/Vitorepf/linkgym-api/internal/progress"
 	"github.com/Vitorepf/linkgym-api/internal/publish"
+	"github.com/Vitorepf/linkgym-api/internal/relogio"
 	"github.com/Vitorepf/linkgym-api/internal/today"
 	"github.com/Vitorepf/linkgym-api/internal/workout"
 )
@@ -38,21 +40,37 @@ func main() {
 
 	addr := ":" + config.Getenv("PORT", "8080")
 	dev := config.Getenv("ENV", "development") == "development"
+	// Sem storage o app continua de pé: avatar/logo caem nas iniciais e o presign
+	// responde 503 — imagem é acabamento, não fundação.
+	signer, err := media.FromEnv(nil)
+	if err != nil {
+		log.Printf("media desligada: %v", err)
+		signer = nil
+	}
 	api := &api{
-		db:       database,
-		auth:     auth.New(database, config.Getenv("AUTH_PEPPER", ""), dev),
-		today:    today.New(database, time.Now),
-		owner:    owner.New(database, time.Now),
-		progress: progress.New(database, time.Now),
-		publish:  publish.New(database, time.Now),
-		workout:  workout.New(database, time.Now),
-		onboard:  onboard.New(database, time.Now),
+		db:   database,
+		auth: auth.New(database, config.Getenv("AUTH_PEPPER", ""), dev),
+		// relogio.Agora, e nao time.Now: TODO servico monta a data com
+		// now.Format("2006-01-02"), e a maquina e um conteiner sem tzdata, ou seja UTC.
+		// Trocar o relogio AQUI conserta a ficha de hoje, a competencia da mensalidade e
+		// os dias parados de uma vez, sem tocar em nenhum servico. Ver internal/relogio.
+		today:    today.New(database, relogio.Agora),
+		owner:    owner.New(database, relogio.Agora),
+		progress: progress.New(database, relogio.Agora),
+		publish:  publish.New(database, relogio.Agora),
+		workout:  workout.New(database, relogio.Agora),
+		onboard:  onboard.New(database, relogio.Agora),
+		media:    signer,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", api.health)
 	mux.HandleFunc("POST /v1/auth/code", api.requestCode)
 	mux.HandleFunc("POST /v1/auth/verify", api.verify)
 	mux.HandleFunc("GET /v1/me", api.me)
+	mux.HandleFunc("PATCH /v1/me", api.withPerson(api.mePatch))
+	mux.HandleFunc("POST /v1/media/presign", api.withPerson(api.mediaPresign))
+	mux.HandleFunc("GET /v1/media/{key...}", api.mediaGet)
+	mux.HandleFunc("PUT /v1/media/{key...}", api.withPerson(api.mediaPut))
 	mux.HandleFunc("POST /v1/auth/logout", api.logout)
 	mux.HandleFunc("GET /v1/today", api.withPerson(api.todayGet))
 	mux.HandleFunc("PUT /v1/today/prontidao", api.withPerson(api.todayProntidaoPut))
@@ -62,6 +80,16 @@ func main() {
 	mux.HandleFunc("GET /v1/owner/week", api.withPerson(api.ownerWeek))
 	mux.HandleFunc("POST /v1/owner/week/approve", api.withPerson(api.ownerWeekApprove))
 	mux.HandleFunc("GET /v1/owner/students/{id}", api.withPerson(api.ownerStudent))
+	mux.HandleFunc("GET /v1/owner/operacao", api.withPerson(api.ownerOperacao))
+	mux.HandleFunc("POST /v1/owner/mensalidades/{bond_id}/pagar", api.withPerson(api.ownerPagarMensalidade))
+	mux.HandleFunc("DELETE /v1/owner/mensalidades/{bond_id}/pagar", api.withPerson(api.ownerDesfazerPagamento))
+	mux.HandleFunc("PUT /v1/owner/mensalidades/{bond_id}", api.withPerson(api.ownerDefinirMensalidade))
+	mux.HandleFunc("PUT /v1/owner/bonds/{bond_id}/estado", api.withPerson(api.ownerMudarEstadoDoVinculo))
+	mux.HandleFunc("POST /v1/owner/extras", api.withPerson(api.ownerCriarExtra))
+	mux.HandleFunc("POST /v1/owner/extras/{id}/recebi", api.withPerson(api.ownerReceberExtra))
+	mux.HandleFunc("DELETE /v1/owner/extras/{id}/recebi", api.withPerson(api.ownerReceberExtra))
+	mux.HandleFunc("PATCH /v1/owner/time", api.withPerson(api.ownerPatchTime))
+	mux.HandleFunc("POST /v1/owner/invites", api.withPerson(api.ownerCriarConvite))
 	mux.HandleFunc("GET /v1/owner/returns", api.withPerson(api.ownerReturns))
 	mux.HandleFunc("POST /v1/owner/returns/{alert_id}/apply", api.withPerson(api.ownerApplyReturn))
 	mux.HandleFunc("POST /v1/comebacks/{id}/complete", api.withPerson(api.comebackComplete))
@@ -71,10 +99,18 @@ func main() {
 	mux.HandleFunc("POST /v1/sessions/{id}/finish", api.withPerson(api.sessionFinish))
 	mux.HandleFunc("GET /v1/progress", api.withPerson(api.progressGet))
 	mux.HandleFunc("GET /v1/records", api.withPerson(api.recordsGet))
+	mux.HandleFunc("GET /v1/exercises", api.withPerson(api.exercisesList))
+	mux.HandleFunc("POST /v1/exercises", api.withPerson(api.exerciseCreate))
+	mux.HandleFunc("PATCH /v1/exercises/{id}", api.withPerson(api.exerciseRename))
 	mux.HandleFunc("GET /v1/models", api.withPerson(api.modelsList))
+	mux.HandleFunc("POST /v1/models", api.withPerson(api.modelCreate))
 	mux.HandleFunc("GET /v1/models/{id}", api.withPerson(api.modelGet))
+	mux.HandleFunc("PATCH /v1/models/{id}", api.withPerson(api.modelRename))
+	mux.HandleFunc("DELETE /v1/models/{id}", api.withPerson(api.modelDelete))
+	mux.HandleFunc("PUT /v1/models/{id}/items", api.withPerson(api.modelItemsPut))
 	mux.HandleFunc("POST /v1/models/{id}/draft-from-last", api.withPerson(api.draftFromLast))
 	mux.HandleFunc("PATCH /v1/prescriptions/{id}/items/{item_id}", api.withPerson(api.patchPrescriptionItem))
+	mux.HandleFunc("POST /v1/prescriptions/{id}/items/{item_id}/swap", api.withPerson(api.swapPrescriptionItem))
 	mux.HandleFunc("POST /v1/publish", api.withPerson(api.publishPost))
 	mux.HandleFunc("PUT /v1/onboarding", api.withPerson(api.onboardingPut))
 	mux.HandleFunc("PUT /v1/commitment", api.withPerson(api.commitmentPut))
@@ -98,6 +134,7 @@ type api struct {
 	publish  *publish.Service
 	workout  *workout.Service
 	onboard  *onboard.Service
+	media    *media.Signer
 }
 
 func (a *api) health(w http.ResponseWriter, _ *http.Request) {

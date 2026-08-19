@@ -345,7 +345,7 @@ func TestD11OpensComebackWithoutWipingPR(t *testing.T) {
 	if got.Comeback.Minutes != 9 {
 		t.Fatalf("minutes %d", got.Comeback.Minutes)
 	}
-	if got.Comeback.CoachLine != "Sem culpa. Nove minutos e você está de volta." {
+	if got.Comeback.CoachLine != "Sua carga e seus recordes continuam aí." {
 		t.Fatalf("coach_line %q", got.Comeback.CoachLine)
 	}
 
@@ -431,5 +431,261 @@ func TestCompleteComebackAwardsRetomadaBadge(t *testing.T) {
 		joseID,
 	).Scan(&key); err != nil {
 		t.Fatalf("retomada row: %v", err)
+	}
+}
+
+// A carga de referencia sai da serie EXECUTADA, nunca da prescrita.
+//
+// A distincao e o ponto todo: o personal prescreve 40 e a pessoa pode ter levantado 47,5.
+// Se este teste passar lendo a prescricao, a tela mostra ao aluno o que mandaram ele fazer
+// e chama isso de "o que voce fez". Por isso o peso executado aqui e de proposito diferente
+// do prescrito — se alguem trocar a fonte por prescription_items, o numero 40 aparece e o
+// teste cai.
+func TestLastLoadComesFromTheExecutedSetNotThePrescribed(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	ctx := context.Background()
+	vitorID := personIDByPhone(t, database, "+5511900000002")
+
+	antes, err := svc.Today(ctx, vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if antes.Prescription == nil || len(antes.Prescription.Items) == 0 {
+		t.Fatal("vitor sem ficha de hoje")
+	}
+	primeiro := antes.Prescription.Items[0]
+	if primeiro.LoadKg != 40 {
+		t.Fatalf("prescrito mudou, o teste perdeu o contraste: %v", primeiro.LoadKg)
+	}
+
+	var studioID string
+	if err := database.QueryRow(
+		`SELECT studio_id::text FROM bonds WHERE id = (SELECT active_bond_id FROM people WHERE id = $1)`,
+		vitorID,
+	).Scan(&studioID); err != nil {
+		t.Fatal(err)
+	}
+
+	var sessionID string
+	if err := database.QueryRow(`
+		INSERT INTO workout_sessions (person_id, studio_id, client_id, started_at, finished_at)
+		VALUES ($1, $2, gen_random_uuid(), now(), now())
+		RETURNING id::text`,
+		vitorID, studioID,
+	).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = database.Exec(`DELETE FROM workout_sessions WHERE id = $1`, sessionID) })
+
+	// performed_at calculado a partir do MAXIMO ja existente, nao de now(). Os 15 pacotes
+	// de teste dividem o mesmo DATABASE_URL (ver Makefile) e o Vitor ja chega aqui com
+	// sessao terminada de outra suite: ancorar em now() deixava a corrida decidir qual
+	// linha o DISTINCT ON escolhe, e o teste passava ou caia por sorte.
+	if _, err := database.Exec(`
+		INSERT INTO workout_sets (session_id, exercise_id, client_set_id, set_index, reps, load_kg, performed_at)
+		VALUES ($1, $2, gen_random_uuid(), 1, 9, 47.5,
+		        (SELECT COALESCE(MAX(performed_at), now()) + interval '1 second' FROM workout_sets))`,
+		sessionID, primeiro.ExerciseID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	depois, err := svc.Today(ctx, vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := depois.Prescription.Items[0]
+	if item.LastKg == nil {
+		t.Fatal("last_kg veio nil, mas a serie executada existe")
+	}
+	if *item.LastKg != 47.5 {
+		t.Fatalf("last_kg = %v, queria 47.5 (o executado), nao %v (o prescrito)", *item.LastKg, item.LoadKg)
+	}
+	if item.LastReps == nil || *item.LastReps != 9 {
+		t.Fatalf("last_reps = %v, queria 9", item.LastReps)
+	}
+	if item.LoadKg != 40 {
+		t.Fatalf("a prescricao foi contaminada: load_kg = %v, tinha que continuar 40", item.LoadKg)
+	}
+}
+
+// Sem historico naquele exercicio, a ausencia tem que ser DIZIVEL: nil, para a tela
+// desenhar o traco. Numero inventado e pior que numero ausente.
+func TestLastLoadIsNilWhenTheBodyNeverDidIt(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	joseID := personIDByPhone(t, database, "+5511900000004")
+
+	got, err := svc.Today(context.Background(), joseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Prescription == nil || len(got.Prescription.Items) == 0 {
+		t.Fatal("jose sem ficha de hoje")
+	}
+	for _, it := range got.Prescription.Items {
+		if it.LastKg != nil {
+			t.Fatalf("%s veio com last_kg %v, mas jose nao tem sessao terminada", it.Name, *it.LastKg)
+		}
+	}
+}
+
+// A Retomada nasce na PRIMEIRA falta, nao no decimo primeiro dia.
+//
+// O caminho antigo era openD11Comeback, que exige `calendarDays(anchor, now) >= 11`, ou o
+// personal aplicar um student_stopped da fila. Este teste nao espera 11 dias: falta UMA
+// vez e cobra a Retomada no mesmo Today. Se alguem tirar o upsert de applyYesterdayMiss,
+// comeback vem nil e isto cai.
+func TestComebackIsBornOnTheFirstMiss(t *testing.T) {
+	database := openSeeded(t)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	restoreVitorOfensiva(t, database, vitorID)
+	bondID := bondIDOf(t, database, vitorID)
+
+	day := pgToday(t, database)
+	svc := New(database, func() time.Time { return day })
+	ontem := day.AddDate(0, 0, -1).Format("2006-01-02")
+
+	if _, err := database.Exec(`DELETE FROM comebacks WHERE bond_id = $1`, bondID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		UPDATE streaks
+		SET current_count = 4, protector_available = true,
+		    protector_spent_at = NULL, last_fulfilled_on = $2::date, updated_at = now()
+		WHERE bond_id = $1`,
+		bondID, ontem,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// Ficha publicada ontem e nenhuma sessao terminada: e isto que define a falta.
+	clonePublishedOn(t, database, vitorID, ontem)
+
+	got, err := svc.Today(context.Background(), vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Comeback == nil {
+		t.Fatal("faltou UMA vez e a Retomada nao apareceu: comeback nil")
+	}
+
+	// O Protetor continua fazendo o que promete: a primeira falta nao zera a Ofensiva.
+	// Retomada nao e castigo, e por isso as duas coisas convivem.
+	if got.Ofensiva.CurrentCount != 4 {
+		t.Fatalf("a primeira falta zerou a Ofensiva: %+v", got.Ofensiva)
+	}
+
+	var aberta int
+	if err := database.QueryRow(
+		`SELECT count(*) FROM comebacks WHERE bond_id = $1 AND completed_at IS NULL`, bondID,
+	).Scan(&aberta); err != nil {
+		t.Fatal(err)
+	}
+	if aberta != 1 {
+		t.Fatalf("comebacks abertas = %d, queria exatamente 1", aberta)
+	}
+
+	// Segunda leitura no mesmo dia nao pode abrir outra: o UNIQUE (bond_id, missed_on) e o
+	// guarda, e sem esta checagem uma falta viraria uma Retomada por abertura de tela.
+	if _, err := svc.Today(context.Background(), vitorID); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(
+		`SELECT count(*) FROM comebacks WHERE bond_id = $1 AND completed_at IS NULL`, bondID,
+	).Scan(&aberta); err != nil {
+		t.Fatal(err)
+	}
+	if aberta != 1 {
+		t.Fatalf("abrir Hoje duas vezes criou %d Retomadas", aberta)
+	}
+}
+
+// Cumprimento e a Sessao do dia FECHADA, e nada alem disso.
+//
+// O teste cobra as duas pontas porque e exatamente aqui que a definicao escorrega: sessao
+// aberta nao cumpre (senao bastaria abrir o app na academia), e sessao fechada cumpre
+// mesmo sem nenhuma serie gravada — Cumprimento nao e volume, nao e carga e nao e
+// percentual do prescrito. Ver o verbete no CONTEXT.md.
+func TestCumprimentoIsTheClosedSessionNotTheOpenOne(t *testing.T) {
+	database := openSeeded(t)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	day := pgToday(t, database)
+	svc := New(database, func() time.Time { return day })
+	ctx := context.Background()
+
+	var prID, studioID string
+	if err := database.QueryRow(`
+		SELECT pr.id::text, pr.studio_id::text FROM prescriptions pr
+		WHERE pr.person_id = $1 AND pr.for_date = current_date AND pr.status = 'published'`,
+		vitorID,
+	).Scan(&prID, &studioID); err != nil {
+		t.Fatal(err)
+	}
+
+	antes, err := svc.Today(ctx, vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if antes.Cumprido {
+		t.Fatal("cumprido=true antes de qualquer sessao terminada")
+	}
+
+	var sessionID string
+	if err := database.QueryRow(`
+		INSERT INTO workout_sessions (person_id, studio_id, prescription_id, client_id, started_at)
+		VALUES ($1, $2, $3, gen_random_uuid(), now())
+		RETURNING id::text`,
+		vitorID, studioID, prID,
+	).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = database.Exec(`DELETE FROM workout_sessions WHERE id = $1`, sessionID) })
+
+	aberta, err := svc.Today(ctx, vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aberta.Cumprido {
+		t.Fatal("sessao ABERTA cumpriu o dia; bastaria abrir o app para a Ofensiva contar")
+	}
+
+	if _, err := database.Exec(
+		`UPDATE workout_sessions SET finished_at = now() WHERE id = $1`, sessionID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	fechada, err := svc.Today(ctx, vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fechada.Cumprido {
+		t.Fatal("sessao FECHADA nao cumpriu o dia")
+	}
+}
+
+// Marco de calendario e dia que a pessoa ja trata como recomeco. Nao precisa de banco:
+// e funcao pura, e por isso este teste roda em qualquer fuso e em qualquer dia.
+func TestMarcoDeCalendario(t *testing.T) {
+	casos := []struct {
+		dia    string
+		quer   bool
+		porque string
+	}{
+		{"2026-08-17", true, "segunda"},
+		{"2026-09-01", true, "dia 1º (e terça: o 1º vale sozinho)"},
+		{"2026-08-19", false, "quarta no meio do mês"},
+		{"2026-08-22", false, "sábado"},
+		{"2026-08-23", false, "domingo não é recomeço aqui; a semana começa na segunda"},
+		{"2026-06-01", true, "dia 1º caindo na segunda: os dois ao mesmo tempo"},
+	}
+	for _, c := range casos {
+		d, err := time.Parse("2006-01-02", c.dia)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := marcoDeCalendario(d); got != c.quer {
+			t.Errorf("%s (%s): marcoDeCalendario = %v, queria %v", c.dia, c.porque, got, c.quer)
+		}
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/Vitorepf/linkgym-api/internal/publish"
 )
 
 type WeekItem struct {
@@ -20,8 +22,14 @@ type LastLoad struct {
 	LoadKg       float64 `json:"load_kg"`
 }
 
+type Combinado struct {
+	AmountCents int `json:"amount_cents"`
+	DueDay      int `json:"due_day"`
+}
+
 type StudentCard struct {
 	PersonID   string     `json:"person_id"`
+	BondID     string     `json:"bond_id"`
 	Name       string     `json:"name"`
 	LastEffort *int       `json:"last_effort"`
 	LastLoads  []LastLoad `json:"last_loads"`
@@ -30,6 +38,9 @@ type StudentCard struct {
 	} `json:"ofensiva"`
 	Suggested      string  `json:"suggested"`
 	CommitmentText *string `json:"commitment_text"`
+	// O combinado desta pessoa. NULL quando o personal nunca digitou — e é essa ausência
+	// que a tela usa para oferecer "Combinar o valor" em vez de mostrar um R$ 0 mentiroso.
+	Combinado *Combinado `json:"combinado"`
 }
 
 func (s *Service) Week(ctx context.Context, ownerID, from string) ([]WeekItem, error) {
@@ -207,39 +218,7 @@ func publishTomorrowFromModelo(ctx context.Context, tx *sql.Tx, studioID, person
 		return false, fmt.Errorf("owner week prescription: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO prescription_items (
-			prescription_id, exercise_id, position, planned_sets, planned_reps,
-			load_kg, rest_seconds, notes, load_source
-		)
-		SELECT $1, mi.exercise_id, mi.position, mi.planned_sets, mi.planned_reps,
-		       COALESCE(last_set.load_kg, hist.load_kg, mi.starter_load_kg, 0),
-		       mi.rest_seconds, mi.notes,
-		       CASE
-		           WHEN last_set.load_kg IS NOT NULL OR hist.load_kg IS NOT NULL THEN 'history'
-		           ELSE 'starter'
-		       END
-		FROM model_items mi
-		LEFT JOIN LATERAL (
-			SELECT pi.load_kg
-			FROM prescriptions pr
-			JOIN prescription_items pi
-			  ON pi.prescription_id = pr.id AND pi.exercise_id = mi.exercise_id
-			WHERE pr.person_id = $2 AND pr.studio_id = $3
-			  AND pr.status = 'published' AND pr.for_date <> $4::date
-			ORDER BY pr.for_date DESC
-			LIMIT 1
-		) hist ON true
-		LEFT JOIN LATERAL (
-			SELECT ws.load_kg
-			FROM workout_sets ws
-			JOIN workout_sessions sess ON sess.id = ws.session_id
-			WHERE sess.person_id = $2 AND sess.studio_id = $3
-			  AND ws.exercise_id = mi.exercise_id AND ws.load_kg IS NOT NULL
-			ORDER BY ws.performed_at DESC
-			LIMIT 1
-		) last_set ON true
-		WHERE mi.model_id = $5::uuid`,
+	if _, err := tx.ExecContext(ctx, publish.ItensComCargaDoCorpo,
 		prID, personID, studioID, tomorrow, modelID,
 	); err != nil {
 		return false, fmt.Errorf("owner week items: %w", err)
@@ -283,6 +262,21 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 	}
 	if err != nil {
 		return nil, fmt.Errorf("owner student: %w", err)
+	}
+	out.BondID = bondID
+
+	// O combinado. Ausente é ausente: sem linha em `mensalidades`, o ponteiro fica nil e a
+	// tela oferece combinar em vez de desenhar R$ 0 — que seria o app afirmando que esta
+	// pessoa treina de graça.
+	var comb Combinado
+	err = s.db.QueryRowContext(ctx, `
+		SELECT amount_cents, due_day FROM mensalidades WHERE bond_id = $1`,
+		bondID,
+	).Scan(&comb.AmountCents, &comb.DueDay)
+	if err == nil {
+		out.Combinado = &comb
+	} else if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("owner student combinado: %w", err)
 	}
 
 	if err := s.db.QueryRowContext(ctx, `

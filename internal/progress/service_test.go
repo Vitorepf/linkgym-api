@@ -120,8 +120,8 @@ func TestLeagueXPStaysOnTheBond(t *testing.T) {
 			meCount++
 		}
 	}
-	if len(vitor.League) != 3 {
-		t.Fatalf("league len %d want 3 students (including 0 XP)", len(vitor.League))
+	if len(vitor.League) != 10 {
+		t.Fatalf("league len %d want 10 (turma inteira, liga corta em 10)", len(vitor.League))
 	}
 	if meCount != 1 || !byName["Vitor"].Me {
 		t.Fatalf("league me %+v", vitor.League)
@@ -132,13 +132,13 @@ func TestLeagueXPStaysOnTheBond(t *testing.T) {
 	if byName["Huan"].XPTotal != 40 {
 		t.Fatalf("huan league xp %d want 40, not vitor+huan", byName["Huan"].XPTotal)
 	}
-	if byName["Jose"].XPTotal != 0 {
-		t.Fatalf("jose league xp %d want 0", byName["Jose"].XPTotal)
-	}
 	if _, ok := byName["Fred"]; ok {
 		t.Fatal("owner must not appear in the student liga")
 	}
-	if vitor.League[0].Name != "Vitor" || vitor.League[1].Name != "Huan" || vitor.League[2].Name != "Jose" {
+	if vitor.League[0].Name != "Vitor" || vitor.League[1].Name != "Huan" {
 		t.Fatalf("order %+v", vitor.League)
+	}
+	if vitor.League[2].XPTotal != 0 {
+		t.Fatalf("terceiro %+v want 0 XP (quem tem zero entra na liga)", vitor.League[2])
 	}
 }

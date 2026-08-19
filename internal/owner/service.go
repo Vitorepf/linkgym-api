@@ -108,12 +108,18 @@ type Record struct {
 	PreviousKg   float64 `json:"previous_kg"`
 }
 
+type Swap struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type ReturnItem struct {
 	AlertID   string    `json:"alert_id"`
 	PersonID  string    `json:"person_id"`
 	Name      string    `json:"name"`
 	Effort    int       `json:"effort"`
 	Records   []Record  `json:"records"`
+	Swaps     []Swap    `json:"swaps"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -144,8 +150,22 @@ func (s *Service) Returns(ctx context.Context, ownerID string) ([]ReturnItem, er
 		return nil, err
 	}
 
+	// A troca de exercicio e da Sessao daquele dia, e o personal le a Sessao aqui. Sem
+	// esta juncao o aviso kind='exercise_swap' era gravado e nunca lido por ninguem. O
+	// nome sai de exercises no momento da leitura: o aviso guarda o id, que nao envelhece.
+	// A juncao compara id::text, e nao o cast para uuid: um payload antigo com texto
+	// solto derrubaria a lista inteira do personal em vez de sumir sozinho.
+	// ponytail: sem indice na comparacao textual; exercises e por time e a fila e curta.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT a.id::text, a.person_id::text, p.name, COALESCE(ws.effort, 0), a.payload, a.created_at
+		SELECT a.id::text, a.person_id::text, p.name, COALESCE(ws.effort, 0), a.payload, a.created_at,
+		       COALESCE((
+		           SELECT json_agg(json_build_object('from', origem.name, 'to', destino.name)
+		                           ORDER BY t.created_at)
+		           FROM session_alerts t
+		           JOIN exercises origem ON origem.id::text = t.payload->>'from'
+		           JOIN exercises destino ON destino.id::text = t.payload->>'to'
+		           WHERE t.session_id = a.session_id AND t.kind = 'exercise_swap'
+		       ), '[]'::json)
 		FROM session_alerts a
 		JOIN people p ON p.id = a.person_id
 		LEFT JOIN workout_sessions ws ON ws.id = a.session_id
@@ -164,12 +184,17 @@ func (s *Service) Returns(ctx context.Context, ownerID string) ([]ReturnItem, er
 			it     ReturnItem
 			effort float64
 			raw    []byte
+			swaps  []byte
 		)
-		if err := rows.Scan(&it.AlertID, &it.PersonID, &it.Name, &effort, &raw, &it.CreatedAt); err != nil {
+		if err := rows.Scan(&it.AlertID, &it.PersonID, &it.Name, &effort, &raw, &it.CreatedAt, &swaps); err != nil {
 			return nil, fmt.Errorf("owner returns scan: %w", err)
 		}
 		it.Effort = int(effort)
 		it.Records = []Record{}
+		it.Swaps = []Swap{}
+		if err := json.Unmarshal(swaps, &it.Swaps); err != nil {
+			return nil, fmt.Errorf("owner returns swaps: %w", err)
+		}
 		var payload struct {
 			Records []Record `json:"records"`
 		}
@@ -223,9 +248,14 @@ func (s *Service) ApplyReturn(ctx context.Context, ownerID, alertID string, bump
 	}
 
 	now := s.now()
+	// As trocas daquela Sessao sobem no mesmo Retorno: quem le uma, leu as outras.
+	// Marcar so o session_synced deixava o aviso de troca fora de read_at para sempre,
+	// e o indice parcial de session_alerts vive de read_at IS NULL.
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE session_alerts SET read_at = $2 WHERE id = $1`,
-		alertID, now,
+		UPDATE session_alerts SET read_at = $3
+		WHERE read_at IS NULL
+		  AND (id = $1 OR (session_id = $2 AND kind = 'exercise_swap'))`,
+		alertID, sessionID, now,
 	); err != nil {
 		return fmt.Errorf("owner apply read: %w", err)
 	}
@@ -286,18 +316,26 @@ func (s *Service) insertTomorrowDraft(ctx context.Context, tx *sql.Tx, sessionID
 	).Scan(draftID); err != nil {
 		return fmt.Errorf("owner apply insert: %w", err)
 	}
+	// O bump entra em UM item. Carimbar 'manual' na copia inteira fazia os outros
+	// itens se declararem decisao do personal quando o numero deles ainda vem do corpo
+	// ou do chute do Modelo — e a cascata levava a mentira para a Prescricao seguinte.
 	if _, err := tx.ExecContext(ctx, `
+		WITH origem AS (
+			SELECT exercise_id, position, planned_sets, planned_reps, load_kg,
+			       rest_seconds, notes, load_source,
+			       position = MIN(position) OVER () AS recebe_bump
+			FROM prescription_items
+			WHERE prescription_id = $2
+		)
 		INSERT INTO prescription_items (
 			prescription_id, exercise_id, position, planned_sets, planned_reps,
 			load_kg, rest_seconds, notes, load_source
 		)
 		SELECT $1, exercise_id, position, planned_sets, planned_reps,
-			GREATEST(0, COALESCE(load_kg, 0) + CASE WHEN position = (
-				SELECT MIN(position) FROM prescription_items WHERE prescription_id = $2
-			) THEN $3::numeric ELSE 0 END),
-			rest_seconds, notes, 'manual'
-		FROM prescription_items
-		WHERE prescription_id = $2`,
+			GREATEST(0, COALESCE(load_kg, 0) + CASE WHEN recebe_bump THEN $3::numeric ELSE 0 END),
+			rest_seconds, notes,
+			CASE WHEN recebe_bump THEN 'manual' ELSE load_source END
+		FROM origem`,
 		*draftID, sourceID.String, bump,
 	); err != nil {
 		return fmt.Errorf("owner apply items: %w", err)

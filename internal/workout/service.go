@@ -216,6 +216,21 @@ func (s *Service) Swap(ctx context.Context, personID, sessionID, fromID, toID st
 		return ErrInvalid
 	}
 
+	// Os dois lados precisam ser exercicio DESTE time: o aviso guarda o id e quem le
+	// resolve o nome depois. id::text no lugar do cast para uuid porque o valor chega
+	// do celular e nem sempre e um uuid.
+	var known int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT count(*) FROM exercises
+		WHERE studio_id = $1 AND id::text IN ($2, $3)`,
+		studioID, fromID, toID,
+	).Scan(&known); err != nil {
+		return fmt.Errorf("swap exercises: %w", err)
+	}
+	if known != 2 {
+		return ErrInvalid
+	}
+
 	payload, err := json.Marshal(map[string]string{
 		"from":   fromID,
 		"to":     toID,
@@ -224,6 +239,8 @@ func (s *Service) Swap(ctx context.Context, personID, sessionID, fromID, toID st
 	if err != nil {
 		return err
 	}
+	// Nao grava serie: a serie do exercicio novo chega pelo sync da Sessao, com
+	// swapped_from_exercise_id. O aviso e o que o personal le em owner.Returns.
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO session_alerts (studio_id, person_id, session_id, kind, payload)
 		VALUES ($1, $2, $3, 'exercise_swap', $4)`,

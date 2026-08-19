@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -36,12 +38,20 @@ type Person struct {
 	Name  string `json:"name"`
 	Phone string `json:"phone"`
 	Role  string `json:"role"`
+	// A chave fica fora do JSON: quem vai para o app é a URL presignada, que o
+	// cmd/api monta com o Signer. Cor vai crua — é só um hex escolhido.
+	AvatarKey   string `json:"-"`
+	AvatarColor string `json:"avatar_color,omitempty"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
 }
 
 type Time struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Accent string `json:"accent_color"`
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Accent  string          `json:"accent_color"`
+	LogoKey string          `json:"-"`
+	LogoURL string          `json:"logo_url,omitempty"`
+	Config  json.RawMessage `json:"config"`
 }
 
 func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (devCode string, tm *Time, err error) {
@@ -50,6 +60,10 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 		return "", nil, err
 	}
 	invite = strings.ToUpper(strings.TrimSpace(invite))
+	invite, err = s.resolverConvite(ctx, phone, invite)
+	if err != nil {
+		return "", nil, err
+	}
 
 	var personID string
 	err = s.db.QueryRowContext(ctx, `SELECT id FROM people WHERE phone = $1`, phone).Scan(&personID)
@@ -75,13 +89,17 @@ func (s *Service) RequestCode(ctx context.Context, rawPhone, invite string) (dev
 
 	if invite != "" {
 		var st Time
+		// O logo e a config vêm JUNTO. A tela de convite é a primeira coisa que o aluno vê
+		// do estúdio, e sem estas duas colunas ela era a única tela do produto que todo
+		// aluno de todo personal via igual: sem rosto e no chão de fábrica.
 		err = s.db.QueryRowContext(ctx, `
-			SELECT s.id::text, s.name, s.accent_color
+			SELECT s.id::text, s.name, s.accent_color,
+			       COALESCE(s.logo_object_key, ''), COALESCE(s.config, '{}'::jsonb)
 			FROM invites i
 			JOIN studios s ON s.id = i.studio_id
 			WHERE i.code = $1 AND i.expires_at > $2`,
 			invite, s.now(),
-		).Scan(&st.ID, &st.Name, &st.Accent)
+		).Scan(&st.ID, &st.Name, &st.Accent, &st.LogoKey, &st.Config)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", nil, fmtErr("invite time", err)
 		}
@@ -130,6 +148,10 @@ func (s *Service) Verify(ctx context.Context, rawPhone, code, invite string) (*S
 		return nil, ErrCodeInvalid
 	}
 	invite = strings.ToUpper(strings.TrimSpace(invite))
+	invite, err = s.resolverConvite(ctx, phone, invite)
+	if err != nil {
+		return nil, err
+	}
 
 	var codeID string
 	var hash []byte
@@ -222,6 +244,42 @@ func (s *Service) Logout(ctx context.Context, rawToken string) error {
 	return err
 }
 
+// O TELEFONE É O CONVITE.
+//
+// O personal digita o número do aluno e manda o convite pelo WhatsApp dele. Nesse
+// instante o número JÁ ESTÁ autorizado: quem decide quem entra no time é o dono do time,
+// e ele decidiu quando digitou. Pedir o código de volta ao aluno é cobrar duas vezes pela
+// mesma autorização — e é a fricção que faz alguém desistir na porta, com o app instalado
+// e o convite aberto na mão.
+//
+// O código não morre com isto: ele continua sendo a única chave do convite ABERTO (o
+// story, o cartaz na parede da academia), onde ninguém sabe de antemão qual é o telefone.
+// O que ele deixa de ser é exigência para quem o personal já chamou pelo nome.
+//
+// A resolução mora AQUI, num lugar só, e devolve o código: tudo que já existia — a checagem
+// de convite, a marca do estúdio na tela de entrada, o vínculo criado em ensurePerson —
+// continua funcionando sem saber que o aluno nunca digitou nada.
+func (s *Service) resolverConvite(ctx context.Context, phone, invite string) (string, error) {
+	if invite != "" {
+		return invite, nil
+	}
+	var code string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT code FROM invites
+		WHERE phone = $1 AND accepted_at IS NULL AND expires_at > $2
+		ORDER BY created_at DESC
+		LIMIT 1`,
+		phone, s.now(),
+	).Scan(&code)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmtErr("convite do telefone", err)
+	}
+	return code, nil
+}
+
 func (s *Service) ensurePerson(ctx context.Context, phone, invite string) (string, error) {
 	var personID string
 	err := s.db.QueryRowContext(ctx, `SELECT id FROM people WHERE phone = $1`, phone).Scan(&personID)
@@ -290,7 +348,9 @@ func (s *Service) loadSession(ctx context.Context, personID string) (*Session, e
 	var out Session
 	err := s.db.QueryRowContext(ctx, `
 		SELECT p.id, p.name, p.phone, COALESCE(b.role, ''),
+		       COALESCE(p.avatar_object_key, ''), COALESCE(p.avatar_color, ''),
 		       COALESCE(s.id::text, ''), COALESCE(s.name, ''), COALESCE(s.accent_color, ''),
+		       COALESCE(s.logo_object_key, ''), COALESCE(s.config, '{}'::jsonb),
 		       COALESCE(b.onboarding ? 'experience', false),
 		       b.commitment_at IS NOT NULL,
 		       NOT EXISTS (
@@ -306,7 +366,8 @@ func (s *Service) loadSession(ctx context.Context, personID string) (*Session, e
 		personID,
 	).Scan(
 		&out.Person.ID, &out.Person.Name, &out.Person.Phone, &out.Person.Role,
-		&out.Time.ID, &out.Time.Name, &out.Time.Accent,
+		&out.Person.AvatarKey, &out.Person.AvatarColor,
+		&out.Time.ID, &out.Time.Name, &out.Time.Accent, &out.Time.LogoKey, &out.Time.Config,
 		&out.OnboardingComplete, &out.CommitmentComplete, &out.Debut,
 	)
 	if err != nil {
@@ -324,4 +385,52 @@ func bytesEqual(a, b []byte) bool {
 		v |= a[i] ^ b[i]
 	}
 	return v == 0
+}
+
+var avatarHex = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+
+// PatchMe: a Pessoa edita o próprio rosto — o nome que aparece, a cor do avatar ou a
+// foto (chave que ela acabou de subir pelo presign). Campos nulos ficam como estão;
+// string vazia em avatar_* LIMPA o campo (voltar para as iniciais é escolha válida).
+func (s *Service) PatchMe(ctx context.Context, personID string, name, avatarColor, avatarKey *string) (*Session, error) {
+	if name == nil && avatarColor == nil && avatarKey == nil {
+		return nil, ErrInvalid
+	}
+	if name != nil {
+		trimmed := strings.TrimSpace(*name)
+		if trimmed == "" {
+			return nil, ErrInvalid
+		}
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE people SET name = $2, updated_at = now() WHERE id = $1`,
+			personID, trimmed,
+		); err != nil {
+			return nil, fmtErr("patch me nome", err)
+		}
+	}
+	if avatarColor != nil {
+		if *avatarColor != "" && !avatarHex.MatchString(*avatarColor) {
+			return nil, ErrInvalid
+		}
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE people SET avatar_color = NULLIF($2, ''), updated_at = now() WHERE id = $1`,
+			personID, *avatarColor,
+		); err != nil {
+			return nil, fmtErr("patch me cor", err)
+		}
+	}
+	if avatarKey != nil {
+		// a chave é do formato que o presign gera: avatar/<person_id>/... — aceitar
+		// qualquer coisa deixaria uma pessoa apontar para a foto de outra.
+		if *avatarKey != "" && !strings.HasPrefix(*avatarKey, "avatar/"+personID+"/") {
+			return nil, ErrInvalid
+		}
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE people SET avatar_object_key = NULLIF($2, ''), updated_at = now() WHERE id = $1`,
+			personID, *avatarKey,
+		); err != nil {
+			return nil, fmtErr("patch me avatar", err)
+		}
+	}
+	return s.loadSession(ctx, personID)
 }

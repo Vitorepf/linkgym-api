@@ -115,3 +115,65 @@ func TestFredDoesNotNeedInvite(t *testing.T) {
 		t.Fatalf("role = %s", session.Person.Role)
 	}
 }
+
+// O TELEFONE É O CONVITE.
+//
+// O personal digita o número do aluno e manda a mensagem pelo WhatsApp dele. A partir
+// desse instante o número está autorizado, e o aluno entra digitando o próprio número —
+// sem código para decorar, ditar na porta da academia ou perder na rolagem da conversa.
+//
+// Este teste é o contrato dessa promessa. Se alguém voltar a exigir o código de quem já
+// foi chamado pelo nome, ele quebra aqui e não na mão de um aluno.
+func TestNumeroChamadoEntraSemCodigo(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	const fone = "+5511955512345"
+
+	limpar := func() {
+		_, _ = svc.db.ExecContext(ctx, `UPDATE people SET active_bond_id = NULL WHERE phone = $1`, fone)
+		_, _ = svc.db.ExecContext(ctx, `DELETE FROM auth_sessions WHERE person_id IN (SELECT id FROM people WHERE phone = $1)`, fone)
+		_, _ = svc.db.ExecContext(ctx, `DELETE FROM bonds WHERE person_id IN (SELECT id FROM people WHERE phone = $1)`, fone)
+		_, _ = svc.db.ExecContext(ctx, `DELETE FROM login_codes WHERE phone = $1`, fone)
+		_, _ = svc.db.ExecContext(ctx, `DELETE FROM invites WHERE phone = $1`, fone)
+		_, _ = svc.db.ExecContext(ctx, `DELETE FROM people WHERE phone = $1`, fone)
+	}
+	limpar()
+	t.Cleanup(limpar)
+
+	var studioID, fredID string
+	if err := svc.db.QueryRowContext(ctx, `SELECT id::text FROM studios WHERE name = $1`, seed.TimeName).Scan(&studioID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.db.QueryRowContext(ctx, `SELECT id::text FROM people WHERE phone = $1`, seed.PhoneFred).Scan(&fredID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.db.ExecContext(ctx, `
+		INSERT INTO invites (studio_id, created_by_person_id, phone, code, expires_at)
+		VALUES ($1, $2, $3, $4, now() + interval '1 year')`,
+		studioID, fredID, fone, "TST-SEMCODIGO",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Convite em branco, de propósito: é assim que a tela de entrada chama a API quando o
+	// aluno só digitou o número dele. E a marca do estúdio tem que voltar JUNTO — é a
+	// primeira coisa que ele vê do personal, antes de existir sessão.
+	code, tm, err := svc.RequestCode(ctx, fone, "")
+	if err != nil {
+		t.Fatalf("número já chamado ainda exigiu convite: %v", err)
+	}
+	if tm == nil || tm.Name != seed.TimeName {
+		t.Fatalf("a marca do estúdio não veio na porta: %+v", tm)
+	}
+
+	session, err := svc.Verify(ctx, fone, code, "")
+	if err != nil {
+		t.Fatalf("verify sem convite: %v", err)
+	}
+	if session.Time.Name != seed.TimeName {
+		t.Fatalf("time = %s", session.Time.Name)
+	}
+	if session.Person.Role != "student" {
+		t.Fatalf("role = %s", session.Person.Role)
+	}
+}

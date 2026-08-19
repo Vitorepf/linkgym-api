@@ -35,6 +35,11 @@ func (a *api) requestCode(w http.ResponseWriter, r *http.Request) {
 		out["dev_code"] = devCode
 	}
 	if tm != nil {
+		// A mesma assinatura da sessão: sem ela o logo do estúdio chega como chave de
+		// storage e a <Image> do convite não desenha nada.
+		if a.media != nil && tm.LogoKey != "" {
+			tm.LogoURL = "/v1/media/" + tm.LogoKey
+		}
 		out["time"] = tm
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -51,6 +56,7 @@ func (a *api) verify(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	a.presignSession(session)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token":  session.Token,
 		"person": session.Person,
@@ -64,6 +70,7 @@ func (a *api) me(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	a.presignSession(session)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"person":              session.Person,
 		"time":                session.Time,

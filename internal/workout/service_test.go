@@ -697,3 +697,32 @@ func TestFinishForbiddenForOtherPerson(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// O aviso guarda o id do exercicio e o Retorno do personal resolve o nome na leitura. Um
+// id que nao e exercicio do time viraria um aviso apontando para o nada.
+func TestSwapRejectsUnknownExercise(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	lift := vitorSupinoToday(t, database)
+	ctx := context.Background()
+
+	started, err := svc.Start(ctx, lift.personID, newUUID(), lift.prescriptionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Swap(ctx, lift.personID, started.ID, lift.exerciseID, "nao-e-um-id"); err != ErrInvalid {
+		t.Fatalf("got %v want %v", err, ErrInvalid)
+	}
+
+	var n int
+	if err := database.QueryRow(`
+		SELECT count(*) FROM session_alerts
+		WHERE session_id = $1 AND kind = 'exercise_swap'`,
+		started.ID,
+	).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("avisos %d want 0", n)
+	}
+}

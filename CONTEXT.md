@@ -20,6 +20,12 @@ _Avoid_: membership, matrícula, turma (turma é a lista de alunos daquele time,
 Única porta de entrada do aluno: o personal manda, a pessoa entra com telefone e código de 4 dígitos. Sem convite não há aluno.
 _Avoid_: signup, cadastro, share link genérico
 
+**Mensalidade**:
+Valor combinado e dia do vencimento daquele Vínculo, digitados uma vez pelo personal; ele marca pago ou em aberto, e o app nunca cobra.
+_Avoid_: financeiro, caixa como entidade, cobrança, checkout, gateway, PSP, boleto, split, nota fiscal, inadimplente, restringir acesso, plano
+
+Receita recorrente, ticket, ativos e em aberto são LEITURAS da Mensalidade sobre a turma. Não viram termo, não viram tabela, não viram tela própria.
+
 **Modelo**:
 Estrutura do treino (exercícios, ordem, séries previstas). Publicar em lote replica o modelo, nunca a carga.
 _Avoid_: treino, ficha, template, workout (ambíguos com prescrição e sessão)
@@ -36,8 +42,12 @@ _Avoid_: treino feito, workout log, check-in
 Série temporal prescrito vs feito, por aluno, por dia. Não é uma entidade à parte — é a leitura da Prescrição contra a Sessão.
 _Avoid_: feed, timeline, dashboard
 
+**Cumprimento**:
+O ato mínimo que fecha o dia da Ofensiva: a Sessão prescrita daquele dia fechada — nunca volume, carga ou percentual do prescrito.
+_Avoid_: meta batida, meta diária, aderência, compliance, 100% do treino
+
 **Ofensiva**:
-Sequência de cumprimentos da meta combinada com o personal ativo. Vive no Vínculo, não na Pessoa e não no Time inteiro. Não é necessariamente 7 dias corridos.
+Sequência de Cumprimentos no Vínculo com o personal ativo. Vive no Vínculo, não na Pessoa e não no Time inteiro. Não é necessariamente 7 dias corridos.
 _Avoid_: streak genérico da conta, hábito, gamificação, ofensiva do time
 
 **Protetor**:

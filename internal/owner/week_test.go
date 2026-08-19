@@ -237,7 +237,7 @@ func TestWeekListsStudentsSelectedWithDefaultManter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 {
+	if len(items) != 28 {
 		t.Fatalf("items %d", len(items))
 	}
 	byName := map[string]WeekItem{}

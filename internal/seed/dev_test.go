@@ -75,6 +75,33 @@ func TestDevSeedIsIdempotent(t *testing.T) {
 		t.Fatalf("students = %d, want 3", students)
 	}
 
+	var turma, fila int
+	if err := database.QueryRow(`
+		SELECT count(*) FROM bonds b
+		JOIN studios s ON s.id = b.studio_id
+		JOIN people owner ON owner.id = s.owner_person_id
+		WHERE owner.phone = $1 AND b.role = 'student' AND b.status = 'active'`,
+		PhoneFred,
+	).Scan(&turma); err != nil {
+		t.Fatal(err)
+	}
+	if turma != 28 {
+		t.Fatalf("turma = %d, want 28", turma)
+	}
+
+	if err := database.QueryRow(`
+		SELECT count(*) FROM attention_items a
+		JOIN studios s ON s.id = a.studio_id
+		JOIN people owner ON owner.id = s.owner_person_id
+		WHERE owner.phone = $1 AND a.for_date = current_date`,
+		PhoneFred,
+	).Scan(&fila); err != nil {
+		t.Fatal(err)
+	}
+	if fila <= 3 {
+		t.Fatalf("Atenção do dia = %d linhas, want > 3: com 3 ou menos a medida lê zero por falta de dado", fila)
+	}
+
 	var timeName, owner string
 	if err := database.QueryRow(`
 		SELECT s.name, p.name
