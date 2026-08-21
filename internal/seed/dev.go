@@ -253,17 +253,22 @@ func seedMensalidades(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("mensalidades: %w", err)
 	}
 
+	// O valor CONGELA no fato, igual PagarMensalidade. Sem amount_cents a coluna fica
+	// no DEFAULT 0 da 00011, o aluno some de em aberto e o recebido não conta o
+	// combinado — os três pedaços deixam de somar a receita.
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO mensalidade_pagamentos (bond_id, month)
-		SELECT b.id, date_trunc('month', current_date)::date
+		INSERT INTO mensalidade_pagamentos (bond_id, month, amount_cents, meio)
+		SELECT b.id, date_trunc('month', current_date)::date, m.amount_cents, 'mao'
 		FROM bonds b
 		JOIN people p ON p.id = b.person_id
 		JOIN studios s ON s.id = b.studio_id
 		JOIN people owner ON owner.id = s.owner_person_id
+		JOIN mensalidades m ON m.bond_id = b.id
 		WHERE owner.phone = $1 AND b.role = 'student' AND b.status = 'active'
 		  AND p.phone <> $2
 		  AND abs(hashtext(p.phone)) % 4 <> 1
-		ON CONFLICT (bond_id, month) DO NOTHING`,
+		ON CONFLICT (bond_id, month) DO UPDATE
+		SET amount_cents = EXCLUDED.amount_cents`,
 		PhoneFred, PhoneJose,
 	); err != nil {
 		return fmt.Errorf("pagamentos: %w", err)
