@@ -199,7 +199,9 @@ func Dev(ctx context.Context, db *sql.DB) error {
 			JOIN studios s ON s.owner_person_id = owner.id
 			WHERE p.phone = $2
 			ON CONFLICT (studio_id, person_id, for_date) DO UPDATE
-			SET reason = EXCLUDED.reason, rank = EXCLUDED.rank`,
+			-- applied_at volta a NULL: o seed promete uma FILA, e uma linha ja aplicada de
+			-- uma rodada anterior deixava o item fora dela em silencio.
+			SET reason = EXCLUDED.reason, rank = EXCLUDED.rank, applied_at = NULL`,
 			PhoneFred, p.phone, p.reason, p.rank,
 		); err != nil {
 			return fmt.Errorf("attention %s: %w", p.name, err)

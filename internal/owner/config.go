@@ -48,6 +48,7 @@ type Aparencia struct {
 	Contraste  *string `json:"contraste,omitempty"`
 	Secundaria *string `json:"secundaria,omitempty"`
 	Forma      *string `json:"forma,omitempty"`
+	Porte      *string `json:"porte,omitempty"`
 	Superficie *string `json:"superficie,omitempty"`
 	Peso       *string `json:"peso,omitempty"`
 	Densidade  *string `json:"densidade,omitempty"`
@@ -70,12 +71,19 @@ var cardapioDaAparencia = map[string][]string{
 	// A anatomia de uma cifra: o mesmo par número/rótulo em três ordens.
 	"numero": {"empilhado", "linha", "cartaz"},
 	// A força das seis tintas contra os quatro fundos. Só SOBE.
-	"contraste":  {"normal", "alto"},
-	"forma":      {"reta", "macia", "pilula"},
-	"superficie": {"solida", "contorno", "elevada", "vidro"},
-	"peso":       {"fino", "medio", "grosso"},
-	"densidade":  {"compacta", "normal", "arejada"},
-	"movimento":  {"seco", "normal", "generoso"},
+	"contraste": {"normal", "alto"},
+	"forma":     {"reta", "macia", "pilula"},
+	// Seis MATERIAIS, e não quatro acabamentos de cor. `vidro` esteve no cardápio três
+	// ciclos com zero componente lendo o desfoque; `fio` e `vinco` entraram no ciclo 9
+	// junto com o encanamento que faltava.
+	"superficie": {"solida", "contorno", "elevada", "vidro", "fio", "vinco", "carimbo", "nenhuma"},
+	// O TAMANHO do botão principal, e ele só DESCE: o teto é o que o app já tinha e o piso
+	// para acima do alvo de dedo. O personal não consegue escolher um botão que o dedo
+	// erra — o cardápio fechado é o que garante isso, aqui e no app.
+	"porte":     {"justo", "padrao", "folgado"},
+	"peso":      {"fino", "medio", "grosso"},
+	"densidade": {"compacta", "normal", "arejada"},
+	"movimento": {"seco", "normal", "generoso"},
 }
 
 var hexDaCor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
@@ -97,7 +105,7 @@ func validaAparencia(a *Aparencia) error {
 		return nil
 	}
 	campos := map[string]*string{
-		"voz": a.Voz, "acao": a.Acao, "forma": a.Forma, "superficie": a.Superficie,
+		"voz": a.Voz, "acao": a.Acao, "forma": a.Forma, "superficie": a.Superficie, "porte": a.Porte,
 		"peso": a.Peso, "densidade": a.Densidade, "movimento": a.Movimento,
 		"hierarquia": a.Hierarquia, "anel": a.Anel, "numero": a.Numero, "contraste": a.Contraste,
 	}

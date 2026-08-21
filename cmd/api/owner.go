@@ -237,6 +237,235 @@ func (a *api) ownerMudarEstadoDoVinculo(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// O VERBO DO ALUNO. Duas rotas do lado dele, e nenhuma delas registra pagamento: uma lê o
+// combinado, a outra diz "já paguei". Quem confirma é o dedo do personal.
+func (a *api) studentMensalidade(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	got, err := a.owner.MensalidadeDoAluno(r.Context(), sess.Person.ID)
+	if err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+func (a *api) studentJaPaguei(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if err := a.owner.DizerQueJaPagou(r.Context(), sess.Person.ID); err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// O toque: gravado ao ABRIR o WhatsApp, nunca ao enviar — o app não sabe se a mensagem foi,
+// e a alternativa a gravar cedo é não gravar nada.
+type toqueReq struct {
+	PersonID string `json:"person_id"`
+	Motivo   string `json:"motivo"`
+}
+
+func (a *api) ownerRegistrarToque(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	var req toqueReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	if err := a.owner.RegistrarToque(r.Context(), sess.Person.ID, req.PersonID, req.Motivo); err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// O CATÁLOGO. Criar produto é escolher uma linha do cardápio de modelos e digitar o preço —
+// o formulário em branco é onde a maioria desiste.
+type produtoReq struct {
+	Tipo       string `json:"tipo"`
+	Nome       string `json:"nome"`
+	PrecoCents int    `json:"preco_cents"`
+	Sessoes    *int   `json:"sessoes"`
+}
+
+func (a *api) ownerCriarProduto(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	var req produtoReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	got, err := a.owner.CriarProduto(r.Context(), sess.Person.ID, req.Tipo, req.Nome, req.PrecoCents, req.Sessoes)
+	if err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+func (a *api) ownerModelosDeProduto(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"items": owner.Modelos()})
+}
+
+type pausarReq struct {
+	Ativo bool `json:"ativo"`
+}
+
+func (a *api) ownerPausarProduto(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	var req pausarReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	if err := a.owner.PausarProduto(r.Context(), sess.Person.ID, r.PathValue("id"), req.Ativo); err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+type venderReq struct {
+	BondID string `json:"bond_id"`
+}
+
+func (a *api) ownerVenderProduto(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	var req venderReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	got, err := a.owner.VenderProduto(r.Context(), sess.Person.ID, r.PathValue("id"), req.BondID)
+	if err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+type usoReq struct {
+	Dia string `json:"dia"`
+}
+
+func (a *api) ownerGastarSessao(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	var req usoReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	if err := a.owner.GastarSessao(r.Context(), sess.Person.ID, r.PathValue("id"), req.Dia); err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// A LOJA DELA. Duas rotas, e nenhuma delas cobra: uma lê o que o personal vende, a outra
+// levanta a mão. Quem fecha a venda é o dedo dele.
+func (a *api) studentLoja(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	got, err := a.owner.LojaDoAluno(r.Context(), sess.Person.ID)
+	if err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": got})
+}
+
+func (a *api) studentQuero(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if err := a.owner.QueroEsse(r.Context(), sess.Person.ID, r.PathValue("id")); err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// O DESFAZER dela. Mesma porta, mão contrária — e é o que torna o "Assinar" de um toque
+// aceitável sem diálogo de confirmação.
+func (a *api) studentDesistir(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if err := a.owner.DesistirDoPedido(r.Context(), sess.Person.ID, r.PathValue("id")); err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// A ASSINATURA. Assinar e cancelar sao do personal; receber quita a competencia mais antiga,
+// como na mensalidade.
+func (a *api) ownerAssinar(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	var req venderReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "json_invalido")
+		return
+	}
+	got, err := a.owner.Assinar(r.Context(), sess.Person.ID, r.PathValue("id"), req.BondID)
+	if err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	// nil sem erro = ela ja assinava. Repetir o toque e a mesma verdade.
+	if got == nil {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+func (a *api) ownerReceberAssinatura(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	if err := a.owner.ReceberAssinatura(r.Context(), sess.Person.ID, r.PathValue("id")); err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *api) ownerCancelarAssinatura(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	if sess.Person.Role != "owner" {
+		writeError(w, http.StatusForbidden, "nao_autorizado")
+		return
+	}
+	if err := a.owner.CancelarAssinatura(r.Context(), sess.Person.ID, r.PathValue("id")); err != nil {
+		writeOwnerError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 type mensalidadeReq struct {
 	AmountCents int `json:"amount_cents"`
 	DueDay      int `json:"due_day"`

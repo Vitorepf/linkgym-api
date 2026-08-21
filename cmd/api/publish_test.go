@@ -86,6 +86,51 @@ func TestPatchPublishedItemHTTPInvalid(t *testing.T) {
 	}
 }
 
+func TestPatchItemNotesHTTP(t *testing.T) {
+	a := testAPI(t)
+	m := modeloNovo(t, a)
+	vitorID := personIDByPhone(t, a.db, seed.PhoneVitor)
+	t.Cleanup(func() {
+		_, _ = a.db.Exec(`DELETE FROM prescriptions WHERE person_id = $1 AND status = 'draft'`, vitorID)
+	})
+	body, _ := json.Marshal(map[string]any{"person_id": vitorID, "from": "model"})
+	rec := chamar(t, a, a.draftFromLast, seed.PhoneFred, http.MethodPost,
+		"/v1/models/"+m.ID+"/draft-from-last", string(body), map[string]string{"id": m.ID})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("draft status %d body %s", rec.Code, rec.Body.String())
+	}
+	var draft struct {
+		DraftID string `json:"draft_id"`
+		Items   []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &draft); err != nil {
+		t.Fatal(err)
+	}
+	if draft.DraftID == "" || len(draft.Items) == 0 {
+		t.Fatalf("draft %s", rec.Body.String())
+	}
+	frase := "Cotovelo no banco."
+	patch, _ := json.Marshal(map[string]any{
+		"load_kg": 20, "planned_sets": 3, "planned_reps": "8-12", "notes": frase,
+	})
+	got := chamar(t, a, a.patchPrescriptionItem, seed.PhoneFred, http.MethodPatch,
+		"/v1/prescriptions/"+draft.DraftID+"/items/"+draft.Items[0].ID,
+		string(patch),
+		map[string]string{"id": draft.DraftID, "item_id": draft.Items[0].ID})
+	if got.Code != http.StatusOK {
+		t.Fatalf("patch status %d body %s", got.Code, got.Body.String())
+	}
+	var notes sql.NullString
+	if err := a.db.QueryRow(`SELECT notes FROM prescription_items WHERE id = $1`, draft.Items[0].ID).Scan(&notes); err != nil {
+		t.Fatal(err)
+	}
+	if !notes.Valid || notes.String != frase {
+		t.Fatalf("notes %v want %q", notes, frase)
+	}
+}
+
 func TestModelsListHTTP(t *testing.T) {
 	a := testAPI(t)
 	token := loginToken(t, a, seed.PhoneFred)

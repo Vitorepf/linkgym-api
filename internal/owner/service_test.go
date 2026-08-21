@@ -237,6 +237,50 @@ func TestOwnerApplyBumpsTomorrowDraft(t *testing.T) {
 	}
 }
 
+func TestOwnerApplyReturnAcceptsPasso1(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	alertID := finishVitorSession(t, database)
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+
+	if _, err := database.Exec(`
+		DELETE FROM prescriptions
+		WHERE person_id = $1 AND for_date = current_date + 1 AND status = 'draft'`,
+		vitorID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.ApplyReturn(context.Background(), fredID, alertID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	var load float64
+	if err := database.QueryRow(`
+		SELECT pi.load_kg
+		FROM prescriptions pr
+		JOIN prescription_items pi ON pi.prescription_id = pr.id AND pi.position = 1
+		WHERE pr.person_id = $1 AND pr.for_date = current_date + 1 AND pr.status = 'draft'`,
+		vitorID,
+	).Scan(&load); err != nil {
+		t.Fatal(err)
+	}
+	if load != 41 {
+		t.Fatalf("load %v want 41 (base 40 + passo 1)", load)
+	}
+}
+
+func TestOwnerApplyReturnRejectsUnknownBump(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	err := svc.ApplyReturn(context.Background(), fredID, newUUID(), 3)
+	if err != ErrInvalid {
+		t.Fatalf("got %v want %v", err, ErrInvalid)
+	}
+}
+
 func TestOwnerApplyMissingAlertNotFound(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
@@ -335,7 +379,7 @@ func restoreJoseAttention(t *testing.T, database *sql.DB) {
 	})
 }
 
-func TestApplyStoppedDeletesAttentionAndOpensComeback(t *testing.T) {
+func TestApplyStoppedMarcaAtencaoEAbreComeback(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)
 	restoreJoseAttention(t, database)
@@ -365,16 +409,23 @@ func TestApplyStoppedDeletesAttentionAndOpensComeback(t *testing.T) {
 		}
 	}
 
-	var n int
+	// A LINHA FICA, com applied_at marcado. Ela era APAGADA, e com ela ia embora o registro
+	// de que o produto sinalizou aquela pessoa E de que o personal agiu — a única memoria
+	// que permite perguntar, depois, se a fila acertou. Sai da fila; nao sai do historico.
+	var vivas, aplicadas int
 	if err := database.QueryRow(`
-		SELECT count(*) FROM attention_items
+		SELECT count(*), count(*) FILTER (WHERE applied_at IS NOT NULL)
+		FROM attention_items
 		WHERE person_id = $1 AND for_date = current_date`,
 		joseID,
-	).Scan(&n); err != nil {
+	).Scan(&vivas, &aplicadas); err != nil {
 		t.Fatal(err)
 	}
-	if n != 0 {
-		t.Fatalf("attention rows %d", n)
+	if vivas == 0 {
+		t.Fatal("a linha da atencao foi apagada: o registro do que ele fez sumiu")
+	}
+	if aplicadas != vivas {
+		t.Fatalf("%d linha(s) e so %d com applied_at", vivas, aplicadas)
 	}
 
 	var comebacks int

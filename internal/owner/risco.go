@@ -66,6 +66,11 @@ const (
 	estreiaMinima = 7
 	// O trabalho é tocar em três hoje.
 	TetoDoRisco = 3
+	// A ESPERA DEPOIS DO TOQUE, e ela é `sumicoDias` de propósito, não um número novo: o
+	// produto já chama sete dias de silêncio de "sumiu". Sete dias de silêncio DEPOIS de
+	// uma mensagem é um fato do mesmo tamanho — e é a única coisa que ele não sabia ontem.
+	// Voltar antes disso não é informação, é a mesma linha outra vez.
+	esperaDoToque = sumicoDias
 )
 
 type fatos struct {
@@ -78,8 +83,17 @@ type fatos struct {
 	abandonada                    sql.NullInt64
 	semPublicar                   sql.NullInt64
 	amountCents                   sql.NullInt64
-	dueDay                        sql.NullInt64
-	pago                          bool
+	// competencias em aberto. O valor da divida e amountCents * mesesAbertos.
+	mesesAbertos sql.NullInt64
+	// dias de atraso da competência em aberto mais antiga. NULL = em dia.
+	vencidoHa sql.NullInt64
+	// dias desde o último toque. NULL = nunca foi tocada.
+	tocadaHa sql.NullInt64
+	// ELA JÁ RESPONDEU: disse que pagou o mês corrente, e o personal ainda não conferiu.
+	// A fila não pode acusar quem já respondeu — era o defeito mais caro que restava nela,
+	// porque a mesma pessoa aparecia na mesma dobra dizendo duas coisas contrárias: "R$ 350
+	// em aberto há 9 dias" na fila, e "disse que pagou" na lista logo abaixo.
+	dizQueJaPagou bool
 }
 
 // Risco é a ÚNICA computação de risco do produto. A Operação e a fila de atenção chamam
@@ -106,15 +120,41 @@ func (s *Service) Risco(ctx context.Context, studioID string) ([]RiscoItem, erro
 		       count(ws.id) FILTER (WHERE ws.finished_at::date > $2::date - $4::int),
 		       count(ws.id) FILTER (WHERE ws.finished_at::date <= $2::date - $4::int
 		                              AND ws.finished_at::date >  $2::date - $5::int),
+		       -- A sessão de HOJE não está abandonada: ela está acontecendo. O app grava
+		       -- started_at na primeira série e só fecha no fim, então durante o treino
+		       -- inteiro existe uma linha com finished_at NULL — sem este corte, a fila de
+		       -- "quem vai sumir" enche das pessoas que estão treinando na frente dele.
 		       ($2::date - max(ws.started_at) FILTER (
 		            WHERE ws.finished_at IS NULL
+		              AND ws.started_at::date <  $2::date
 		              AND ws.started_at::date > $2::date - $6::int)::date),
 		       ($2::date - (SELECT max(pr.published_at)::date FROM prescriptions pr
 		                     WHERE pr.person_id = p.id AND pr.studio_id = b.studio_id
 		                       AND pr.status = 'published')),
-		       m.amount_cents, m.due_day,
-		       EXISTS (SELECT 1 FROM mensalidade_pagamentos pg
-		                WHERE pg.bond_id = b.id AND pg.month = $3::date)
+		       m.amount_cents,
+		       ab.meses,
+		       -- O ATRASO, em dias, da competência em aberto MAIS ANTIGA — a mesma
+		       -- derivação de operacao.go, e pelos mesmos dois motivos: a conta antiga
+		       -- (hoje.Day() menos due_day) zerava na virada do mês, bem quando a dívida
+		       -- dobra, e nunca alcançava 5 dias para due_day 27 ou 28. NULL = em dia.
+		       -- LEAST IGNORA NULL, e as duas pontas desta conta podem ser NULL: quem
+		       -- nao tem combinado (m.due_day) e quem PAGOU TUDO (min(g.mes)). Nos dois
+		       -- casos LEAST devolvia o segundo argumento — a idade do vinculo — e o teto
+		       -- virava o VALOR: quem esta em dia ha 119 dias lia "R$ 350 em aberto ha 119
+		       -- dias" no topo da fila, com [Recebi]. O CASE devolve o NULL que a conta tem.
+		       CASE WHEN ab.mes_aberto IS NULL OR m.due_day IS NULL THEN NULL ELSE
+		         LEAST($2::date - (ab.mes_aberto + (m.due_day - 1)),
+		               $2::date - b.created_at::date)
+		       END,
+		       -- O QUE ELE JÁ FEZ. A tabela toques era escrita e nunca lida: segunda ele mandava
+		       -- mensagem para a Marina, terça ela estava no topo de novo com o mesmo
+		       -- motivo. Uma fila que não responde ao trabalho dele é uma fila que ele
+		       -- para de rolar.
+		       ($2::date - (SELECT max(t.created_at)::date FROM toques t
+		                     WHERE t.person_id = p.id AND t.studio_id = b.studio_id)),
+		       -- O QUE ELA JÁ DISSE. Mesma fonte da lista de em aberto (ja_paguei), ou as
+		       -- duas leituras do mesmo mês discordam na mesma tela.
+		       EXISTS (SELECT 1 FROM ja_paguei j WHERE j.bond_id = b.id AND j.month = $3::date)
 		FROM bonds b
 		JOIN people p ON p.id = b.person_id
 		LEFT JOIN mensalidades m ON m.bond_id = b.id
@@ -125,8 +165,19 @@ func (s *Service) Risco(ctx context.Context, studioID string) ([]RiscoItem, erro
 		LEFT JOIN workout_sessions ws
 		       ON ws.person_id = p.id AND ws.studio_id = b.studio_id
 		LEFT JOIN streaks st ON st.bond_id = b.id
+		-- AS COMPETENCIAS EM ABERTO, uma vez por vinculo. ESPELHO da LATERAL de
+		-- operacao.go: MESMA janela (GREATEST vinculo/combinado) e MESMA contagem, ou a fila
+		-- e a lista logo abaixo dela dizem dois valores para a mesma divida da mesma pessoa.
+		LEFT JOIN LATERAL (
+		    SELECT count(*) AS meses, min(g.mes)::date AS mes_aberto
+		      FROM generate_series(GREATEST(date_trunc('month', b.created_at),
+		                                    date_trunc('month', m.created_at))::date,
+		                           $3::date, interval '1 month') g(mes)
+		     WHERE NOT EXISTS (SELECT 1 FROM mensalidade_pagamentos pg
+		                        WHERE pg.bond_id = b.id AND pg.month = g.mes::date)
+		) ab ON true
 		WHERE b.studio_id = $1 AND b.role = 'student' AND b.status = 'active'
-		GROUP BY b.id, p.id, p.name, p.phone, b.created_at, m.amount_cents, m.due_day`,
+		GROUP BY b.id, p.id, p.name, p.phone, b.created_at, m.amount_cents, m.due_day, ab.mes_aberto, ab.meses`,
 		studioID, hoje, mes, janelaDias, baseDias, silencioDias,
 	)
 	if err != nil {
@@ -142,11 +193,12 @@ func (s *Service) Risco(ctx context.Context, studioID string) ([]RiscoItem, erro
 		if err := rows.Scan(
 			&f.bondID, &f.personID, &f.name, &f.phone,
 			&f.desde, &f.ultima, &f.total, &f.recentes, &f.base,
-			&f.abandonada, &f.semPublicar, &f.amountCents, &f.dueDay, &f.pago,
+			&f.abandonada, &f.semPublicar, &f.amountCents, &f.mesesAbertos, &f.vencidoHa,
+			&f.tocadaHa, &f.dizQueJaPagou,
 		); err != nil {
 			return nil, fmt.Errorf("risco scan: %w", err)
 		}
-		if a, ok := avaliar(f, diaDoMes(s.now())); ok {
+		if a, ok := avaliar(f); ok && !jaTocada(f, a) {
 			achados = append(achados, a)
 		}
 	}
@@ -174,11 +226,9 @@ type achado struct {
 	gravidade  int
 }
 
-func diaDoMes(t interface{ Day() int }) int { return t.Day() }
-
 // A ORDEM DOS SINAIS é a decisão de produto inteira: o primeiro que casar vira a frase, e
 // os outros não aparecem. Do mais caro de ignorar para o menos.
-func avaliar(f fatos, hojeDia int) (achado, bool) {
+func avaliar(f fatos) (achado, bool) {
 	nome := f.name
 	base := func(prio, grav int, motivo, acao, sinal string, cents int) (achado, bool) {
 		return achado{
@@ -196,20 +246,40 @@ func avaliar(f fatos, hojeDia int) (achado, bool) {
 		parado = int(f.ultima.Int64)
 	}
 	vencidoHa := -1
-	if f.dueDay.Valid && !f.pago {
-		vencidoHa = hojeDia - int(f.dueDay.Int64)
+	if f.vencidoHa.Valid {
+		vencidoHa = int(f.vencidoHa.Int64)
 	}
+	// O TAMANHO DA DIVIDA, e nao um mes: a mesma pessoa lia "R$ 350 em aberto" aqui e
+	// "5 meses · R$ 1.750" na lista 200pt abaixo, na mesma rolagem. Um ponto so, para o
+	// motivo e o AmountCents do item nao poderem divergir.
 	valor := 0
-	if f.amountCents.Valid {
-		valor = int(f.amountCents.Int64)
+	if f.amountCents.Valid && f.mesesAbertos.Valid {
+		valor = int(f.amountCents.Int64) * int(f.mesesAbertos.Int64)
 	}
 
 	// (1) DINHEIRO + SUMIÇO. Quem deve E sumiu é quem cancela — as outras cinco linhas são
-	// prevenção, esta é a que já está acontecendo. Ação: [Recebi], porque a conversa de
-	// cobrança é dele e o app não escreve cobrança no lugar de ninguém.
+	// prevenção, esta é a que já está acontecendo. Ação: [Recebi], porque a conversa é dele
+	// e o app não escreve no lugar de ninguém.
+	//
+	// QUEM JÁ RESPONDEU NÃO É ACUSADA. Se ela tocou "já paguei", a frase muda de dona: não
+	// é mais "ela não pagou há 9 dias", é "ele ainda não conferiu". Na foto de hoje a mesma
+	// Marina aparece na dobra duas vezes dizendo coisas contrárias — "R$ 350 em aberto há 9
+	// dias" aqui em cima, "disse que pagou" 275pt abaixo — e é a fila que está errada, não
+	// a lista: `ja_paguei` é o dado mais novo sobre aquele mês, e a fila não o lia.
+	//
+	// Ela CONTINUA na fila, e é isso que separa esta correção de esconder o problema: ela
+	// sumiu há 12 dias, e isso não deixou de ser verdade porque ela respondeu sobre o
+	// dinheiro. O que muda é a frase e o dedo — [Conferir], que é o mesmo verbo que a linha
+	// de baixo já usa para ela.
 	if vencidoHa >= atrasoDias && parado >= sumicoDias {
+		if f.dizQueJaPagou {
+			return base(1, vencidoHa+parado,
+				fmt.Sprintf("Disse que pagou R$ %s, e está há %s sem treinar.",
+					reaisCurto(valor), dias(parado)),
+				"recebi", "disse_que_pagou_e_sumico", valor)
+		}
 		return base(1, vencidoHa+parado,
-			fmt.Sprintf("R$ %s em aberto há %s, e %s sem treinar",
+			fmt.Sprintf("R$ %s em aberto há %s, e %s sem treinar.",
 				reaisCurto(valor), dias(vencidoHa), dias(parado)),
 			"recebi", "dinheiro_e_sumico", valor)
 	}
@@ -270,6 +340,21 @@ func avaliar(f fatos, hojeDia int) (achado, bool) {
 	}
 
 	return achado{}, false
+}
+
+// A FILA RESPONDE AO TRABALHO DELE. Suprime só o que é PEDIDO REPETIDO — as linhas de
+// ação "mandar", que são as duas únicas que gravam toque (Operacao.tsx: `case "mandar"`).
+//
+// SUMIR, e não aparecer marcada: o teto é TRÊS, e um nome riscado ocupa uma das três vagas
+// sem produzir trabalho — que é a definição de culpa da doutrina desta casa. O registro de
+// que ele trabalhou já tem lugar: o placar do rodapé, "você tocou em 7 este mês".
+//
+// E DINHEIRO NÃO ESPERA. `dinheiro_e_sumico` não é pedido, é fato a registrar — a ação é
+// [Recebi], que ninguém manda para ninguém. Esconder dinheiro por causa de uma mensagem
+// enviada é o mesmo defeito ao contrário. É assim que o sinal muda o prazo: pela AÇÃO, sem
+// segundo limiar.
+func jaTocada(f fatos, a achado) bool {
+	return a.item.Acao == "mandar" && f.tocadaHa.Valid && int(f.tocadaHa.Int64) < esperaDoToque
 }
 
 func sortAchados(a []achado) {

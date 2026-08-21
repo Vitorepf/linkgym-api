@@ -198,6 +198,103 @@ func TestManualLoadSource(t *testing.T) {
 	}
 }
 
+func TestPatchItemWritesNotesAndDraftReturnsThem(t *testing.T) {
+	database := openSeeded(t)
+	now, tomorrow := clockOnDBDay(t, database)
+	svc := New(database, func() time.Time { return now })
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	modelID := treinoA(t, database)
+	clearTomorrow(t, database, []string{vitorID}, tomorrow)
+
+	draft, err := svc.DraftFromLast(context.Background(), fredID, modelID, vitorID, "last")
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemID := draft.Items[0].ID
+	frase := "Cotovelo no banco. Sem impulso."
+	if err := svc.PatchItem(context.Background(), fredID, draft.DraftID, itemID, ItemPatch{
+		LoadKg:      draft.Items[0].LoadKg,
+		PlannedSets: draft.Items[0].PlannedSets,
+		PlannedReps: draft.Items[0].PlannedReps,
+		Notes:       &frase,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := loadDraftItems(context.Background(), database, draft.DraftID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0].Notes == nil || *got[0].Notes != frase {
+		t.Fatalf("notes %+v want %q", got[0].Notes, frase)
+	}
+
+	vazio := ""
+	if err := svc.PatchItem(context.Background(), fredID, draft.DraftID, itemID, ItemPatch{
+		LoadKg:      draft.Items[0].LoadKg,
+		PlannedSets: draft.Items[0].PlannedSets,
+		PlannedReps: draft.Items[0].PlannedReps,
+		Notes:       &vazio,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := loadDraftItems(context.Background(), database, draft.DraftID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared[0].Notes != nil {
+		t.Fatalf("empty notes should clear, got %+v", cleared[0].Notes)
+	}
+}
+
+func TestPatchItemWithoutNotesLeavesExisting(t *testing.T) {
+	database := openSeeded(t)
+	now, tomorrow := clockOnDBDay(t, database)
+	svc := New(database, func() time.Time { return now })
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	modelID := treinoA(t, database)
+	clearTomorrow(t, database, []string{vitorID}, tomorrow)
+
+	draft, err := svc.DraftFromLast(context.Background(), fredID, modelID, vitorID, "last")
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemID := draft.Items[0].ID
+	frase := "Escápulas juntas."
+	if err := svc.PatchItem(context.Background(), fredID, draft.DraftID, itemID, ItemPatch{
+		LoadKg:      40,
+		PlannedSets: draft.Items[0].PlannedSets,
+		PlannedReps: draft.Items[0].PlannedReps,
+		Notes:       &frase,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.PatchItem(context.Background(), fredID, draft.DraftID, itemID, ItemPatch{
+		LoadKg:      42.5,
+		PlannedSets: draft.Items[0].PlannedSets,
+		PlannedReps: draft.Items[0].PlannedReps,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var load float64
+	var notes sql.NullString
+	if err := database.QueryRow(`
+		SELECT load_kg, notes FROM prescription_items WHERE id = $1`,
+		itemID,
+	).Scan(&load, &notes); err != nil {
+		t.Fatal(err)
+	}
+	if load != 42.5 {
+		t.Fatalf("load %v want 42.5", load)
+	}
+	if !notes.Valid || notes.String != frase {
+		t.Fatalf("notes %v want %q", notes, frase)
+	}
+}
+
 func TestListModelsIncludesTreinoA(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)

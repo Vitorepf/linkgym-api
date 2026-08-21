@@ -36,6 +36,13 @@ type Extra struct {
 	CriadaEm   string  `json:"criada_em"`
 	RecebidaEm *string `json:"recebida_em"`
 	CopiaECola string  `json:"copia_e_cola"`
+	// Quando a venda veio de um PACOTE do cardápio: quantas sessões ele tem e quantas
+	// sobraram. O saldo é `sessoes - count(usos)`, nunca uma coluna que decrementa —
+	// contador que anda sozinho diverge em silêncio.
+	Sessoes *int `json:"sessoes"`
+	Sobram  *int `json:"sobram"`
+	// Quando a venda saiu do cardápio. NULL = avulso de dois campos.
+	ProdutoID *string `json:"produto_id"`
 }
 
 const maxDescricao = 60
@@ -83,11 +90,24 @@ func (s *Service) CriarExtra(ctx context.Context, ownerID, bondID, descricao str
 func (s *Service) ExtrasAbertos(ctx context.Context, studioID string) ([]Extra, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id::text, c.bond_id::text, p.id::text, p.name, c.descricao, c.valor_cents,
-		       c.criada_em::date::text
+		       c.criada_em::date::text,
+		       pr.sessoes,
+		       pr.sessoes - (SELECT count(*) FROM usos_do_pacote u WHERE u.extra_id = c.id),
+		       c.produto_id::text
 		FROM extras c
+		LEFT JOIN produtos pr ON pr.id = c.produto_id AND pr.tipo = 'pacote' 
 		JOIN bonds b ON b.id = c.bond_id
 		JOIN people p ON p.id = b.person_id
-		WHERE b.studio_id = $1 AND b.status = 'active' AND c.recebida_em IS NULL
+		-- SEM filtro de status, e de propósito. Pausar existe para quem viaja dois meses
+		-- (ver vinculo.go), e pausar não perdoa o whey que ela já levou: uma dívida aberta
+		-- continua aberta. A linha é nominal, então ela não polui contagem nenhuma — e o
+		-- [Recebi] não filtra status, então nada fica preso sem saída.
+		-- O PACOTE fica enquanto tiver saldo, mesmo pago: o trabalho dele não acabou no
+		-- pagamento, acabou quando a última sessão foi usada. O resto sai ao ser recebido.
+		WHERE b.studio_id = $1
+		  AND (c.recebida_em IS NULL
+		       OR (pr.sessoes IS NOT NULL
+		           AND pr.sessoes > (SELECT count(*) FROM usos_do_pacote u WHERE u.extra_id = c.id)))
 		ORDER BY c.criada_em`,
 		studioID,
 	)
@@ -100,7 +120,7 @@ func (s *Service) ExtrasAbertos(ctx context.Context, studioID string) ([]Extra, 
 	for rows.Next() {
 		var c Extra
 		if err := rows.Scan(&c.ID, &c.BondID, &c.PersonID, &c.Name, &c.Descricao,
-			&c.ValorCents, &c.CriadaEm); err != nil {
+			&c.ValorCents, &c.CriadaEm, &c.Sessoes, &c.Sobram, &c.ProdutoID); err != nil {
 			return nil, fmt.Errorf("extras abertas scan: %w", err)
 		}
 		out = append(out, c)

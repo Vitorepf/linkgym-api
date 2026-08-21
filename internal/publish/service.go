@@ -84,12 +84,18 @@ type DraftItem struct {
 	PlannedReps string  `json:"planned_reps"`
 	LoadKg      float64 `json:"load_kg"`
 	LoadSource  string  `json:"load_source"`
+	// A frase do personal neste exercício. Ausente é ausente: a tela do aluno não
+	// inventa voz no lugar dele.
+	Notes *string `json:"notes"`
 }
 
 type ItemPatch struct {
 	LoadKg      float64 `json:"load_kg"`
 	PlannedSets int     `json:"planned_sets"`
 	PlannedReps string  `json:"planned_reps"`
+	// Opcional de propósito: cliente antigo manda só carga/séries/reps e a frase
+	// que já estava no item fica. String vazia apaga.
+	Notes *string `json:"notes"`
 }
 
 // ItensComCargaDoCorpo replica a ESTRUTURA do Modelo e resolve a CARGA de cada corpo.
@@ -683,7 +689,8 @@ func loadDraftItems(ctx context.Context, q interface {
 }, draftID string) ([]DraftItem, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT pi.id::text, pi.exercise_id::text, e.name,
-		       pi.planned_sets, pi.planned_reps, COALESCE(pi.load_kg, 0), pi.load_source
+		       pi.planned_sets, pi.planned_reps, COALESCE(pi.load_kg, 0), pi.load_source,
+		       pi.notes
 		FROM prescription_items pi
 		JOIN exercises e ON e.id = pi.exercise_id
 		WHERE pi.prescription_id = $1
@@ -698,8 +705,13 @@ func loadDraftItems(ctx context.Context, q interface {
 	items := []DraftItem{}
 	for rows.Next() {
 		var it DraftItem
-		if err := rows.Scan(&it.ID, &it.ExerciseID, &it.Name, &it.PlannedSets, &it.PlannedReps, &it.LoadKg, &it.LoadSource); err != nil {
+		var notes sql.NullString
+		if err := rows.Scan(&it.ID, &it.ExerciseID, &it.Name, &it.PlannedSets, &it.PlannedReps, &it.LoadKg, &it.LoadSource, &notes); err != nil {
 			return nil, fmt.Errorf("publish draft list scan: %w", err)
+		}
+		if notes.Valid && strings.TrimSpace(notes.String) != "" {
+			n := notes.String
+			it.Notes = &n
 		}
 		items = append(items, it)
 	}
@@ -848,12 +860,26 @@ func (s *Service) PatchItem(ctx context.Context, ownerID, prescriptionID, itemID
 		return ErrInvalid
 	}
 
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE prescription_items
-		SET load_kg = $3, planned_sets = $4, planned_reps = $5, load_source = 'manual'
-		WHERE id = $1 AND prescription_id = $2`,
-		itemID, prescriptionID, patch.LoadKg, patch.PlannedSets, patch.PlannedReps,
-	)
+	var res sql.Result
+	if patch.Notes == nil {
+		res, err = s.db.ExecContext(ctx, `
+			UPDATE prescription_items
+			SET load_kg = $3, planned_sets = $4, planned_reps = $5, load_source = 'manual'
+			WHERE id = $1 AND prescription_id = $2`,
+			itemID, prescriptionID, patch.LoadKg, patch.PlannedSets, patch.PlannedReps,
+		)
+	} else {
+		var notes any
+		if n := strings.TrimSpace(*patch.Notes); n != "" {
+			notes = n
+		}
+		res, err = s.db.ExecContext(ctx, `
+			UPDATE prescription_items
+			SET load_kg = $3, planned_sets = $4, planned_reps = $5, notes = $6, load_source = 'manual'
+			WHERE id = $1 AND prescription_id = $2`,
+			itemID, prescriptionID, patch.LoadKg, patch.PlannedSets, patch.PlannedReps, notes,
+		)
+	}
 	if err != nil {
 		return fmt.Errorf("publish patch: %w", err)
 	}

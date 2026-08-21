@@ -3,6 +3,7 @@ package owner
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -41,6 +42,24 @@ type StudentCard struct {
 	// O combinado desta pessoa. NULL quando o personal nunca digitou — e é essa ausência
 	// que a tela usa para oferecer "Combinar o valor" em vez de mostrar um R$ 0 mentiroso.
 	Combinado *Combinado `json:"combinado"`
+	// O QUE ELA ASSINA, e é aqui que a assinatura ganha porta de saída: a lista "Todo mês"
+	// da Operação é o trabalho do mês, e encerrar é mudança de combinado — assunto da pessoa.
+	Assinaturas []AssinaturaDaPessoa `json:"assinaturas"`
+	// O que ela respondeu na entrada. NULL quando ainda não respondeu — a tela não inventa
+	// "nunca treinei" no lugar de um vazio. É o mesmo documento que o aluno grava; o
+	// personal precisa lê-lo antes de montar a ficha, senão a dor no joelho some.
+	Onboarding *Onboarding `json:"onboarding"`
+}
+
+// Onboarding é o que a pessoa disse de si na porta. Os nomes dos campos são o contrato
+// que o aluno já grava — não se traduzem aqui.
+type Onboarding struct {
+	Experience  string  `json:"experience"`
+	DaysPerWeek int     `json:"days_per_week"`
+	Pain        bool    `json:"pain"`
+	Sex         string  `json:"sex,omitempty"`
+	HeightCm    int     `json:"height_cm,omitempty"`
+	WeightKg    float64 `json:"weight_kg,omitempty"`
 }
 
 func (s *Service) Week(ctx context.Context, ownerID, from string) ([]WeekItem, error) {
@@ -242,9 +261,10 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 		published  int
 		openCome   sql.NullString
 		commitment sql.NullString
+		onboarding sql.NullString
 	)
 	err = s.db.QueryRowContext(ctx, `
-		SELECT p.id::text, p.name, b.id::text, b.commitment_text,
+		SELECT p.id::text, p.name, b.id::text, b.commitment_text, b.onboarding::text,
 		       (SELECT a.reason FROM attention_items a
 		        WHERE a.person_id = p.id AND a.studio_id = b.studio_id AND a.for_date = $3::date
 		        LIMIT 1),
@@ -256,7 +276,7 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 		JOIN bonds b ON b.person_id = p.id AND b.studio_id = $2
 		WHERE p.id = $1 AND b.role = 'student' AND b.status = 'active'`,
 		personID, studioID, s.now().Format("2006-01-02"),
-	).Scan(&out.PersonID, &out.Name, &bondID, &commitment, &reason, &published, &openCome)
+	).Scan(&out.PersonID, &out.Name, &bondID, &commitment, &onboarding, &reason, &published, &openCome)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -333,6 +353,22 @@ func (s *Service) Student(ctx context.Context, ownerID, personID string) (*Stude
 		text := commitment.String
 		out.CommitmentText = &text
 	}
+
+	if onboarding.Valid && onboarding.String != "" && onboarding.String != "null" && onboarding.String != "{}" {
+		var ob Onboarding
+		if err := json.Unmarshal([]byte(onboarding.String), &ob); err != nil {
+			return nil, fmt.Errorf("owner student onboarding: %w", err)
+		}
+		if ob.Experience != "" {
+			out.Onboarding = &ob
+		}
+	}
+
+	assinaturas, err := s.AssinaturasDaPessoa(ctx, studioID, personID)
+	if err != nil {
+		return nil, err
+	}
+	out.Assinaturas = assinaturas
 
 	out.Suggested = studentSuggested(reason.String, openCome.Valid, published > 0)
 	return &out, nil

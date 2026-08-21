@@ -34,7 +34,7 @@ func (s *Service) Apply(ctx context.Context, ownerID, attentionID string) error 
 	err = tx.QueryRowContext(ctx, `
 		SELECT person_id::text, reason
 		FROM attention_items
-		WHERE id = $1 AND studio_id = $2
+		WHERE id = $1 AND studio_id = $2 AND applied_at IS NULL
 		FOR UPDATE`,
 		attentionID, studioID,
 	).Scan(&personID, &reason)
@@ -45,8 +45,16 @@ func (s *Service) Apply(ctx context.Context, ownerID, attentionID string) error 
 		return fmt.Errorf("owner attention apply: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM attention_items WHERE id = $1`, attentionID); err != nil {
-		return fmt.Errorf("owner attention delete: %w", err)
+	// APPLIED_AT, e não DELETE. A linha anterior apagava o item: toda vez que o personal
+	// agia sobre a fila, o sistema destruía o registro de que tinha sinalizado aquela pessoa
+	// E de que ele tinha agido. O campo `Applied bool` do struct já existia, já era
+	// serializado, e nunca foi preenchido por ninguém — sem esta memória não há como
+	// perguntar se a fila acerta, e a resposta só existe olhando para trás.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE attention_items SET applied_at = now() WHERE id = $1 AND applied_at IS NULL`,
+		attentionID,
+	); err != nil {
+		return fmt.Errorf("owner attention aplicar: %w", err)
 	}
 
 	if reason == "student_stopped" {

@@ -353,6 +353,73 @@ func TestStudentCardReturnsCommitmentText(t *testing.T) {
 	}
 }
 
+func TestStudentCardReturnsOnboarding(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	t.Cleanup(func() {
+		_, _ = database.Exec(`
+			UPDATE bonds SET onboarding = '{"experience":"training","days_per_week":3,"pain":false}'::jsonb
+			WHERE person_id = $1 AND role = 'student'`,
+			vitorID,
+		)
+	})
+
+	if _, err := database.Exec(`
+		UPDATE bonds SET onboarding = '{"experience":"never","days_per_week":4,"pain":true,"sex":"female","height_cm":165,"weight_kg":62}'::jsonb
+		WHERE person_id = $1 AND role = 'student'`,
+		vitorID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Student(context.Background(), fredID, vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Onboarding == nil {
+		t.Fatal("onboarding missing")
+	}
+	ob := got.Onboarding
+	if ob.Experience != "never" || ob.DaysPerWeek != 4 || !ob.Pain {
+		t.Fatalf("onboarding %+v", ob)
+	}
+	if ob.Sex != "female" || ob.HeightCm != 165 || ob.WeightKg != 62 {
+		t.Fatalf("body %+v", ob)
+	}
+}
+
+func TestStudentCardOnboardingNilWhenEmpty(t *testing.T) {
+	database := openSeeded(t)
+	svc := New(database, time.Now)
+	fredID := personIDByPhone(t, database, seed.PhoneFred)
+	vitorID := personIDByPhone(t, database, seed.PhoneVitor)
+	t.Cleanup(func() {
+		_, _ = database.Exec(`
+			UPDATE bonds SET onboarding = '{"experience":"training","days_per_week":3,"pain":false}'::jsonb
+			WHERE person_id = $1 AND role = 'student'`,
+			vitorID,
+		)
+	})
+
+	if _, err := database.Exec(`
+		UPDATE bonds SET onboarding = '{}'::jsonb
+		WHERE person_id = $1 AND role = 'student'`,
+		vitorID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Student(context.Background(), fredID, vitorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Onboarding != nil {
+		t.Fatalf("onboarding %+v want nil", got.Onboarding)
+	}
+}
+
 func TestStudentCardKeepForVitor(t *testing.T) {
 	database := openSeeded(t)
 	svc := New(database, time.Now)

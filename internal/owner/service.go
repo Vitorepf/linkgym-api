@@ -92,9 +92,15 @@ func (s *Service) Home(ctx context.Context, personID string) (*Home, error) {
 	}
 	out.Fio = fio
 
+	// EX-ALUNO NÃO É TRABALHO. `session_alerts` não tinha filtro de vínculo nenhum, então
+	// quem o personal encerrou continuava gerando sessão e reaparecendo aqui como retorno
+	// para ele ler — ele acha que fechou a porta e o produto continua trazendo a pessoa de
+	// volta para a fila dele. O aviso fica gravado (é fato); ele só não é mais trabalho.
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT count(*) FROM session_alerts
-		WHERE studio_id = $1 AND kind = 'session_synced' AND read_at IS NULL`,
+		SELECT count(*) FROM session_alerts a
+		JOIN bonds b ON b.person_id = a.person_id AND b.studio_id = a.studio_id
+		WHERE a.studio_id = $1 AND a.kind = 'session_synced' AND a.read_at IS NULL
+		  AND b.status = 'active'`,
 		studioID,
 	).Scan(&out.UnreadReturns); err != nil {
 		return nil, fmt.Errorf("owner home returns: %w", err)
@@ -168,6 +174,10 @@ func (s *Service) Returns(ctx context.Context, ownerID string) ([]ReturnItem, er
 		       ), '[]'::json)
 		FROM session_alerts a
 		JOIN people p ON p.id = a.person_id
+		-- Só quem ainda é do time. Ver o comentário em Home: o aviso de quem foi encerrado
+		-- fica gravado, mas para de disputar a fila de trabalho do personal.
+		JOIN bonds b ON b.person_id = a.person_id AND b.studio_id = a.studio_id
+		                AND b.status = 'active'
 		LEFT JOIN workout_sessions ws ON ws.id = a.session_id
 		WHERE a.studio_id = $1 AND a.kind = 'session_synced' AND a.read_at IS NULL
 		ORDER BY a.created_at DESC`,
@@ -207,7 +217,15 @@ func (s *Service) Returns(ctx context.Context, ownerID string) ([]ReturnItem, er
 }
 
 func allowedBump(v float64) bool {
-	return v == 2.5 || v == 0 || v == -2.5
+	if v == 0 {
+		return true
+	}
+	a := v
+	if a < 0 {
+		a = -a
+	}
+	// O passo do Time: 0.5, 1 ou 2.5. 2.5 continua válido para quem não configurou.
+	return a == 0.5 || a == 1 || a == 2.5
 }
 
 func (s *Service) ApplyReturn(ctx context.Context, ownerID, alertID string, bump float64) error {
@@ -361,7 +379,9 @@ func (s *Service) loadAttention(ctx context.Context, studioID, day string) ([]At
 		JOIN people p ON p.id = a.person_id
 		LEFT JOIN bonds b ON b.person_id = a.person_id AND b.studio_id = a.studio_id AND b.status = 'active'
 		LEFT JOIN streaks st ON st.bond_id = b.id
-		WHERE a.studio_id = $1 AND a.for_date = $2
+		-- Aplicado sai da fila, mas a linha FICA: é ela que registra o que o produto
+		-- sinalizou e o que o personal fez a respeito.
+		WHERE a.studio_id = $1 AND a.for_date = $2 AND a.applied_at IS NULL
 		ORDER BY a.rank
 		LIMIT 3`,
 		studioID, day,

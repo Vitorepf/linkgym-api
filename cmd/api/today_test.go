@@ -238,6 +238,51 @@ func TestOwnerStudentReturnsCommitmentTextAfterPut(t *testing.T) {
 	}
 }
 
+func TestOwnerStudentReturnsOnboardingHTTP(t *testing.T) {
+	a := testAPI(t)
+	fredTok := loginToken(t, a, seed.PhoneFred)
+	var vitorID string
+	if err := a.db.QueryRow(`SELECT id::text FROM people WHERE phone = $1`, seed.PhoneVitor).Scan(&vitorID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = a.db.Exec(`
+			UPDATE bonds SET onboarding = '{"experience":"training","days_per_week":3,"pain":false}'::jsonb
+			WHERE person_id = $1 AND role = 'student'`,
+			vitorID,
+		)
+	})
+	if _, err := a.db.Exec(`
+		UPDATE bonds SET onboarding = '{"experience":"never","days_per_week":4,"pain":true}'::jsonb
+		WHERE person_id = $1 AND role = 'student'`,
+		vitorID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/owner/students/"+vitorID, nil)
+	req.Header.Set("Authorization", "Bearer "+fredTok)
+	req.SetPathValue("id", vitorID)
+	rec := httptest.NewRecorder()
+	a.withPerson(a.ownerStudent)(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Onboarding *struct {
+			Experience  string `json:"experience"`
+			DaysPerWeek int    `json:"days_per_week"`
+			Pain        bool   `json:"pain"`
+		} `json:"onboarding"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Onboarding == nil || got.Onboarding.Experience != "never" || got.Onboarding.DaysPerWeek != 4 || !got.Onboarding.Pain {
+		t.Fatalf("body %s", rec.Body.String())
+	}
+}
+
 func TestOwnerStudentNotFound(t *testing.T) {
 	a := testAPI(t)
 	token := loginToken(t, a, seed.PhoneFred)
